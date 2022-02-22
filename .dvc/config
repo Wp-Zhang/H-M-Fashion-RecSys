@@ -1,4 +1,4 @@
 [core]
     remote = myremote
 ['remote "myremote"']
-    url = gdrive://1nIh3NAHwAu1SGZQVCSnw4DE0j2HcEEZ4
+    url = s3://hm-recsys/data/
