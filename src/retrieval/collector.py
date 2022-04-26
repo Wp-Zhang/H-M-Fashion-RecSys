@@ -6,6 +6,8 @@ from .rules import PersonalRetrieveRule, GlobalRetrieveRule, FilterRule
 
 
 class RuleCollector:
+    """Collect retrieval candidates by rules"""
+
     def collect(
         self,
         customer_list: np.ndarray,
@@ -14,15 +16,25 @@ class RuleCollector:
         item_id: str = "article_id",
         compress=True,
     ) -> pd.DataFrame:
-        """Use rules to Retrieve items for each user
+        """Collect retreival results
 
-        Args:
-            customer_list (np.ndarray): target customer list
-            rules (List): rules to Retrieve items
-            filter (RetrieveRule, optional): filter to remove some Retrieveed items. Defaults to None.
+        Parameters
+        ----------
+        customer_list : np.ndarray
+            Target customer list.
+        rules : List
+            List of rules to retrieve items.
+        filters : List, optional
+            Filters to remove some retrieved items, by default ``None``.
+        item_id : str, optional
+            Item unit, by default ``"article_id"``.
+        compress : bool, optional
+            Whether to compress the candidate items into a list, by default ``True``.
 
-        Returns:
-            pd.DataFrame: prediction
+        Returns
+        -------
+        pd.DataFrame
+            Dataframe of candidate items.
         """
         # * Check parameters
         customer_list = np.array(customer_list)

@@ -1,0 +1,10 @@
+sphinx==4.5.0
+sphinx-rtd-theme==1.0.0
+readthedocs-sphinx-search==0.1.1
+sphinxcontrib-napoleon==0.7
+myst_parser==0.17.0
+
+numpy
+pandas
+scikit_learn
+tqdm

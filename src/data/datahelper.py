@@ -8,6 +8,8 @@ from pathlib import Path
 
 
 class DataHelper:
+    """Helper class for loadiing, preprocessing and saving data."""
+
     def __init__(self, data_dir: str, raw_dir: str = "raw"):
         """Initialize DataHelper.
 
@@ -201,7 +203,10 @@ class DataHelper:
         return data
 
     def preprocess_data(self, save: bool = True, name: str = "encoded_full") -> dict:
-        """Preprocess raw data.
+        """Preprocess raw data:
+            1. encode ids
+            2. label encode categorical features
+            3. impute
 
         Parameters
         ----------

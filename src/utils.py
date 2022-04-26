@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 
 
-def calc_valid_date(week_num: int, last_date: str = "2020-09-22") -> Tuple[str]:
+def calc_valid_date(week_num: int, last_date: str = "2020-09-29") -> Tuple[str]:
     """Calculate start and end date of a given week number.
 
     Parameters
@@ -225,19 +225,20 @@ def merge_week_data(
 
     # * ======================================================================================================================
 
-    label.columns = ["customer_id", "label_article"]
-    candidates = candidates.merge(label, on=["customer_id"], how="left")
+    if label is not None:  # * label is None means this is the test data
+        label.columns = ["customer_id", "label_article"]
+        candidates = candidates.merge(label, on=["customer_id"], how="left")
 
-    candidates = candidates[candidates["label_article"].notnull()]
-    candidates["label"] = candidates.progress_apply(
-        lambda x: 1 if x["article_id"] in x["label_article"] else 0, axis=1
-    )
+        candidates = candidates[candidates["label_article"].notnull()]
+        candidates["label"] = candidates.progress_apply(
+            lambda x: 1 if x["article_id"] in x["label_article"] else 0, axis=1
+        )
 
-    # candidates['label'] = 0
-    # mask = candidates['label_article'].notnull()
-    # candidates.loc[mask, 'label'] = candidates[mask].progress_apply(lambda x: 1 if x['article_id'] in x['label_article'] else 0, axis=1)
+        # candidates['label'] = 0
+        # mask = candidates['label_article'].notnull()
+        # candidates.loc[mask, 'label'] = candidates[mask].progress_apply(lambda x: 1 if x['article_id'] in x['label_article'] else 0, axis=1)
 
-    del candidates["label_article"]
+        del candidates["label_article"]
 
     # * ======================================================================================================================
 

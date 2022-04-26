@@ -10,9 +10,11 @@ Contents:
 
 .. toctree::
    :maxdepth: 2
+   :caption: API
 
-   getting-started
-   commands
+   Data<data>
+   Feature Engineering<features>
+   Retrieval<retrieval>
 
 
 
