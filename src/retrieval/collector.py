@@ -71,7 +71,7 @@ class RuleCollector:
             pred_df = pd.concat([pred_df, tmp_df], ignore_index=True)
 
         # pred_df = pred_df.sort_values(by=["customer_id", "rank"]).reset_index(drop=True)
-        pred_df = pred_df.drop_duplicates(["customer_id", item_id], keep="first")
+        # pred_df = pred_df.drop_duplicates(["customer_id", item_id], keep="first")
 
         # * Compress the result.
         if compress:

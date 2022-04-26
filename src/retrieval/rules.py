@@ -13,7 +13,7 @@ class PersonalRetrieveRule(ABC):
         """Retrieve items
 
         Returns:
-            pd.DataFrame: (customer_id, article_id, method, rank)
+            pd.DataFrame: (customer_id, article_id, method, score)
         """
 
 
@@ -25,7 +25,7 @@ class GlobalRetrieveRule(ABC):
         """Retrieve items
 
         Returns:
-            pd.DataFrame: (article_id, method, rank)
+            pd.DataFrame: (article_id, method, score)
         """
 
 
@@ -82,16 +82,15 @@ class OrderHistory(PersonalRetrieveRule):
 
         res["diff_dat"] = (res.max_dat - res.t_dat).dt.days
         res = res.loc[res["diff_dat"] < self.days].reset_index(drop=True)
+        res = res.sort_values(by=["diff_dat"], ascending=True).reset_index(drop=True)
+        res = res.groupby(["customer_id", self.iid], as_index=False).first()
 
-        res = (
-            res[["customer_id", self.iid, "index"]]
-            .groupby(["customer_id", self.iid], as_index=False)
-            .last()
-        )
+        res = res.reset_index()
         res = res.sort_values(by="index", ascending=False).reset_index(drop=True)
         res["rank"] = res.groupby(["customer_id"])["index"].rank(
             ascending=True, method="first"
         )
+        res["score"] = res["diff_dat"]
 
         if self.n is not None:
             res = res.loc[res["rank"] <= self.n]
@@ -99,9 +98,73 @@ class OrderHistory(PersonalRetrieveRule):
         else:
             res["method"] = f"OrderHistory_{self.days}"
 
-        res = res[["customer_id", self.iid, "rank", "method"]]
+        res = res[["customer_id", self.iid, "score", "method"]]
 
         return res
+
+
+class OrderHistoryDecay(PersonalRetrieveRule):
+    def __init__(
+        self,
+        trans_df,
+        days: int = 7,
+        n: int = None,
+        item_id: str = "article_id",
+    ):
+        self.iid = item_id
+        self.trans_df = trans_df[["customer_id", self.iid, "t_dat"]]
+        self.days = days
+        self.n = n
+
+    def retrieve(self):
+        df = self.trans_df
+        df["t_dat"] = pd.to_datetime(df["t_dat"])
+        last_ts = df["t_dat"].max()
+        df["dat_gap"] = (last_ts - df["t_dat"]).dt.days
+
+        df["last_day"] = last_ts - (last_ts - df["t_dat"]).dt.floor(f"{self.days}D")
+        period_sales = (
+            df[["last_day", self.iid, "t_dat"]].groupby(["last_day", self.iid]).count()
+        )
+        period_sales = period_sales.rename(columns={"t_dat": "period_sale"})
+        df = df.join(period_sales, on=["last_day", self.iid])
+
+        period_sales = period_sales.reset_index().set_index(self.iid)
+        last_day = last_ts.strftime("%Y-%m-%d")
+        df = df.join(
+            period_sales.loc[period_sales["last_day"] == last_day, ["period_sale"]],
+            on=self.iid,
+            rsuffix="_targ",
+        )
+        df["period_sale_targ"].fillna(0, inplace=True)
+        df["quotient"] = df["period_sale_targ"] / df["period_sale"]
+        del df["period_sale_targ"], df["period_sale"]
+
+        df["dat_gap"][df["dat_gap"] < 1] = 1
+        x = df["dat_gap"]
+
+        a, b, c, d = 2.5e4, 1.5e5, 2e-1, 1e3
+        df["value"] = a / np.sqrt(x) + b * np.exp(-c * x) - d
+        df["value"][df["value"] < 0] = 0
+        df["value"] = df["value"] * df["quotient"]
+
+        df = df.groupby(["customer_id", self.iid], as_index=False)["value"].sum()
+        df = df.sort_values(by="value", ascending=False).reset_index(drop=True)
+        df = df.reset_index()
+
+        df["rank"] = df.groupby(["customer_id"])["index"].rank(
+            ascending=True, method="first"
+        )
+        df["score"] = df["value"]
+        df = df[df["value"] > 150]
+        if self.n is not None:
+            df = df[df["rank"] <= self.n]
+            df["method"] = f"OrderHistoryDecay_{self.days}_top{self.n}"
+        else:
+            df["method"] = f"OrderHistoryDecay_{self.days}"
+        df = df[["customer_id", self.iid, "score", "method"]]
+
+        return df
 
 
 class ItemPair(PersonalRetrieveRule):
@@ -138,7 +201,7 @@ class ItemPair(PersonalRetrieveRule):
         pair = pair.sort_values("count", ascending=False).reset_index(drop=True)
         pair = pair.groupby(self.iid).first().reset_index()
         pair = pair.sort_values(by="count", ascending=False).reset_index(drop=True)
-        pair["rank"] = pair.index + 1
+        pair["score"] = pair["count"]
 
         return pair
 
@@ -153,7 +216,7 @@ class ItemPair(PersonalRetrieveRule):
         df[self.iid] = df["pair"].astype("int32")
         df["method"] = "ItemPairRetrieve" + str(np.random.randint(1, 100))
 
-        df = df[["customer_id", self.iid, "method", "rank"]]
+        df = df[["customer_id", self.iid, "method", "score"]]
         return df
 
 
@@ -201,9 +264,68 @@ class TimeHistory(GlobalRetrieveRule):
         df = df.groupby(self.iid, as_index=False)["count"].sum()
         df = df.sort_values(by="count", ascending=False).reset_index(drop=True)
         df["rank"] = df.index + 1
+        df["score"] = df["count"]
         df["method"] = f"TimeHistory_{self.n}"
 
-        df = df[df["rank"] <= self.n][[self.iid, "rank", "method"]]
+        df = df[df["rank"] <= self.n][[self.iid, "score", "method"]]
+
+        return df
+
+
+class TimeHistoryDecay(GlobalRetrieveRule):
+    def __init__(
+        self,
+        trans_df,
+        days=7,
+        n=12,
+        item_id: str = "article_id",
+    ):
+        self.iid = item_id
+        self.trans_df = trans_df[["customer_id", self.iid, "t_dat"]]
+        self.days = days
+        self.n = n
+
+    def retrieve(self):
+        df = self.trans_df
+        df["t_dat"] = pd.to_datetime(df["t_dat"])
+        last_ts = df["t_dat"].max()
+        df["dat_gap"] = (last_ts - df["t_dat"]).dt.days
+
+        df["last_day"] = last_ts - (last_ts - df["t_dat"]).dt.floor(f"{self.days}D")
+        period_sales = (
+            df[["last_day", self.iid, "t_dat"]].groupby(["last_day", self.iid]).count()
+        )
+        period_sales = period_sales.rename(columns={"t_dat": "period_sale"})
+        df = df.join(period_sales, on=["last_day", self.iid])
+
+        period_sales = period_sales.reset_index().set_index(self.iid)
+        last_day = last_ts.strftime("%Y-%m-%d")
+        df = df.join(
+            period_sales.loc[period_sales["last_day"] == last_day, ["period_sale"]],
+            on=self.iid,
+            rsuffix="_targ",
+        )
+        df["period_sale_targ"].fillna(0, inplace=True)
+        df["quotient"] = df["period_sale_targ"] / df["period_sale"]
+        del df["period_sale_targ"], df["period_sale"]
+
+        df["dat_gap"][df["dat_gap"] < 1] = 1
+        x = df["dat_gap"]
+
+        a, b, c, d = 2.5e4, 1.5e5, 2e-1, 1e3
+        df["value"] = a / np.sqrt(x) + b * np.exp(-c * x) - d
+        df["value"][df["value"] < 0] = 0
+        df["value"] = df["value"] * df["quotient"]
+
+        df = df.groupby([self.iid], as_index=False)["value"].sum()
+        df = df.sort_values(by="value", ascending=False).reset_index(drop=True)
+
+        df["rank"] = df.index + 1
+        df["score"] = df["value"]
+        df = df[df["rank"] <= self.n]
+
+        df["method"] = f"TimeHistoryDecay_{self.days}_top{self.n}"
+        df = df[[self.iid, "score", "method"]]
 
         return df
 
@@ -296,69 +418,6 @@ class SaleTrendRetrieve(GlobalRetrieveRule):
         log = log.sort_values(by=["count_x", "trend"], ascending=False)
 
         return list(log[self.iid].values[: self.n])
-
-
-class OrderHistoryDecayRetrieve(PersonalRetrieveRule):
-    def __init__(
-        self,
-        trans_df,
-        a=2.5e4,
-        b=1.5e5,
-        c=2e-1,
-        d=1e3,
-        n=12,
-        item_id: str = "article_id",
-    ):
-        self.iid = item_id
-        self.trans_df = trans_df[["customer_id", self.iid, "t_dat"]]
-        self.a = a
-        self.b = b
-        self.c = c
-        self.d = d
-        self.n = n
-
-    def retrieve(self):
-        df = self.trans_df
-        df["t_dat"] = pd.to_datetime(df["t_dat"])
-        last_ts = df["t_dat"].max()
-        df["dat_gap"] = (last_ts - df["t_dat"]).dt.days
-
-        df["last_day"] = last_ts - (last_ts - df["t_dat"]).dt.floor(f"{self.n}D")
-        period_sales = (
-            df[["last_day", self.iid, "t_dat"]].groupby(["last_day", self.iid]).count()
-        )
-        period_sales = period_sales.rename(columns={"t_dat": "period_sale"})
-        df = df.join(period_sales, on=["last_day", self.iid])
-
-        period_sales = period_sales.reset_index().set_index(self.iid)
-        last_day = last_ts.strftime("%Y-%m-%d")
-        df = df.join(
-            period_sales.loc[period_sales["last_day"] == last_day, ["period_sale"]],
-            on=self.iid,
-            rsuffix="_targ",
-        )
-        df["period_sale_targ"].fillna(0, inplace=True)
-        df["quotient"] = df["period_sale_targ"] / df["period_sale"]
-        del df["period_sale_targ"], df["period_sale"]
-
-        df["dat_gap"][df["dat_gap"] < 1] = 1
-        x = df["dat_gap"]
-        df["value"] = self.a / np.sqrt(x) + self.b * np.exp(-self.c * x) - self.d
-        df["value"][df["value"] < 0] = 0
-        df["value"] = df["value"] * df["quotient"]
-
-        df = df.groupby(["customer_id", self.iid], as_index=False)["value"].sum()
-        df = df.sort_values(by="value", ascending=False).reset_index(drop=True)
-        df = df.reset_index()
-
-        df["rank"] = df.groupby(["customer_id"])["index"].rank(
-            ascending=True, method="first"
-        )
-        df = df[df["rank"] <= self.n]
-        df = df[["customer_id", self.iid]]
-        df.columns = ["customer_id", "prediction"]
-
-        return df
 
 
 class TimeHistoryRetrieve2(GlobalRetrieveRule):
