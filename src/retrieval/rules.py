@@ -151,7 +151,7 @@ class ItemPair(PersonalRetrieveRule):
 
         df = df.drop_duplicates(["customer_id", "pair"])
         df[self.iid] = df["pair"].astype("int32")
-        df["method"] = "ItemPairRetrieve"
+        df["method"] = "ItemPairRetrieve" + str(np.random.randint(1, 100))
 
         df = df[["customer_id", self.iid, "method", "rank"]]
         return df

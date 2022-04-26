@@ -214,15 +214,6 @@ def merge_week_data(
     )
     trans_info["week"] = week_num
 
-    # candidates = candidates.merge(item[['article_id','product_code']], on='article_id', how='left')
-    # pid_iid = item[["product_code", "article_id"]]
-    # pid_iid.columns = ["product_code", "other_article_id"]
-    # candidates = candidates.merge(pid_iid, on="product_code")
-
-    # candidates.drop(columns=['product_code'], inplace=True)
-    # candidates.rename(columns={"article_id":"origin_article_id", "other_article_id":"article_id"}, inplace=True)
-    # candidates = candidates.drop_duplicates().reset_index(drop=True)
-
     # * ======================================================================================================================
 
     if label is not None:  # * label is None means this is the test data
