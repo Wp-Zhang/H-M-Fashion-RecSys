@@ -2,7 +2,12 @@ import pandas as pd
 import numpy as np
 from typing import List
 from tqdm import tqdm
-from .rules import PersonalRetrieveRule, GlobalRetrieveRule, FilterRule
+from .rules import (
+    PersonalRetrieveRule,
+    UserGroupRetrieveRule,
+    GlobalRetrieveRule,
+    FilterRule,
+)
 
 
 class RuleCollector:
@@ -10,6 +15,7 @@ class RuleCollector:
 
     def collect(
         self,
+        data: dict,
         customer_list: np.ndarray,
         rules: List,
         filters: List = None,
@@ -20,6 +26,8 @@ class RuleCollector:
 
         Parameters
         ----------
+        data : dict
+            Dataset.
         customer_list : np.ndarray
             Target customer list.
         rules : List
@@ -65,8 +73,15 @@ class RuleCollector:
                 tmp_df = tmp_df.reset_index(drop=True)
                 tmp_df["customer_id"] = tmp_user
 
-            else:  # * PersonalRetrieveRule
+            elif isinstance(rule, PersonalRetrieveRule):
                 tmp_df = items
+
+            elif isinstance(rule, UserGroupRetrieveRule):
+                user = data["user"][[*rule.cat_cols, "customer_id"]]
+                tmp_df = pd.DataFrame({"customer_id": customer_list})
+                tmp_df = tmp_df.merge(user, on="customer_id", how="left")
+                tmp_df = tmp_df.merge(items, on=[*rule.cat_cols], how="left")
+                tmp_df = tmp_df[["customer_id", item_id, "score", "method"]]
 
             pred_df = pd.concat([pred_df, tmp_df], ignore_index=True)
 
@@ -90,8 +105,10 @@ class RuleCollector:
     @staticmethod
     def _check_rule(rules: List) -> None:
         for rule in rules:
-            if not isinstance(rule, PersonalRetrieveRule) and not isinstance(
-                rule, GlobalRetrieveRule
+            if (
+                not isinstance(rule, PersonalRetrieveRule)
+                and not isinstance(rule, GlobalRetrieveRule)
+                and not isinstance(rule, UserGroupRetrieveRule)
             ):
                 raise TypeError(
                     "Rule must be `PersonalRetrieveRule` or `GlobalRetrieveRule`"

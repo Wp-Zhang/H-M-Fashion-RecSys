@@ -17,6 +17,18 @@ class PersonalRetrieveRule(ABC):
         """
 
 
+class UserGroupRetrieveRule(ABC):
+    """Use certain rules to respectively retrieve items for each group of customers."""
+
+    @abstractmethod
+    def retrieve(self) -> pd.DataFrame:
+        """Retrieve items
+
+        Returns:
+            pd.DataFrame: (*group_cols, article_id, method, score)
+        """
+
+
 class GlobalRetrieveRule(ABC):
     """Use certain rules to retrieve items for all customers."""
 
@@ -217,6 +229,66 @@ class ItemPair(PersonalRetrieveRule):
         df["method"] = "ItemPairRetrieve" + str(np.random.randint(1, 100))
 
         df = df[["customer_id", self.iid, "method", "score"]]
+        return df
+
+
+# * ====================== User Group Retrieve Rules ====================== *
+
+
+class UserGroupTimeHistory(UserGroupRetrieveRule):
+    """Retrieve popular items of each **user** group in specified time window."""
+
+    def __init__(
+        self,
+        trans_df: pd.DataFrame,
+        cat_cols: List,
+        n: int = 12,
+        unique: bool = True,
+        item_id: str = "article_id",
+    ):
+        """Initialize TimeHistory.
+
+        Parameters
+        ----------
+        trans_df : pd.DataFrame
+            Dataframe of transaction records.
+        cat_cols: List
+            Name of user group columns.
+        n : int, optional
+            Get top `n` popular items, by default ``12``.
+        unique : bool, optional
+            Whether to drop duplicate buying records, by default ``True``.
+        item_id : str, optional
+            Name of item id, by default ``"article_id"``.
+        """
+        self.iid = item_id
+        self.trans_df = trans_df[["customer_id", self.iid, *cat_cols]]
+        self.cat_cols = cat_cols
+        self.unique = unique
+        self.n = n
+
+    def retrieve(self) -> List[int]:
+        """Get popular items in the specified time window
+
+        Returns:
+            List[int]: top n popular items
+        """
+        df = self.trans_df
+        if self.unique:
+            df = df.drop_duplicates(["customer_id", self.iid])
+        df["count"] = 1
+        df = df.groupby([*self.cat_cols, self.iid], as_index=False)["count"].sum()
+        df = df.sort_values(by="count", ascending=False).reset_index(drop=True)
+        df = df.reset_index()
+
+        df["rank"] = df.groupby([*self.cat_cols])["index"].rank(
+            ascending=True, method="first"
+        )
+
+        df["score"] = df["count"]
+        df["method"] = "UGTimeHistory" + "_".join(self.cat_cols) + "_" + str(self.n)
+        df = df[df["rank"] <= self.n][[*self.cat_cols, self.iid, "score", "method"]]
+
         return df
 
 
