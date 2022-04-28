@@ -8,6 +8,7 @@ from .rules import (
     GlobalRetrieveRule,
     FilterRule,
 )
+from sklearn.preprocessing import QuantileTransformer, StandardScaler
 
 
 class RuleCollector:
@@ -15,7 +16,6 @@ class RuleCollector:
 
     def collect(
         self,
-        data: dict,
         customer_list: np.ndarray,
         rules: List,
         filters: List = None,
@@ -26,8 +26,6 @@ class RuleCollector:
 
         Parameters
         ----------
-        data : dict
-            Dataset.
         customer_list : np.ndarray
             Target customer list.
         rules : List
@@ -61,32 +59,17 @@ class RuleCollector:
         pred_df = None
         for rule in tqdm(rules, "Retrieve items by rules"):
             items = rule.retrieve()
+            scaler = QuantileTransformer(output_distribution="normal")
+            # scaler = StandardScaler()
+            items["score"] = scaler.fit_transform(items["score"].values.reshape(-1, 1))
             items = items.loc[~items[item_id].isin(rm_items)].reset_index(drop=True)
 
-            if isinstance(rule, GlobalRetrieveRule):
-                # * add `customer_id` to `GlobalRetrieveRule` results
-                num_item = items.shape[0]
-                num_user = customer_list.shape[0]
+            pred_df = pd.concat([pred_df, items], ignore_index=True)
 
-                tmp_user = np.repeat(customer_list, num_item)
-                tmp_df = items.iloc[np.tile(np.arange(num_item), num_user)]
-                tmp_df = tmp_df.reset_index(drop=True)
-                tmp_df["customer_id"] = tmp_user
-
-            elif isinstance(rule, PersonalRetrieveRule):
-                tmp_df = items
-
-            elif isinstance(rule, UserGroupRetrieveRule):
-                user = data["user"][[*rule.cat_cols, "customer_id"]]
-                tmp_df = pd.DataFrame({"customer_id": customer_list})
-                tmp_df = tmp_df.merge(user, on="customer_id", how="left")
-                tmp_df = tmp_df.merge(items, on=[*rule.cat_cols], how="left")
-                tmp_df = tmp_df[["customer_id", item_id, "score", "method"]]
-
-            pred_df = pd.concat([pred_df, tmp_df], ignore_index=True)
-
-        # pred_df = pred_df.sort_values(by=["customer_id", "rank"]).reset_index(drop=True)
-        # pred_df = pred_df.drop_duplicates(["customer_id", item_id], keep="first")
+        # pred_df = pred_df.sort_values(by=["customer_id", "score"]).reset_index(
+        #     drop=True
+        # )
+        # pred_df = pred_df.drop_duplicates(["customer_id", item_id], keep="last")
 
         # * Compress the result.
         if compress:
