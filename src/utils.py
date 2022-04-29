@@ -213,6 +213,9 @@ def merge_week_data(
         .drop(columns=["customer_id"])
     )
     trans_info["week"] = week_num
+    trans_info, _ = reduce_mem_usage(trans_info)
+    # item, _ = reduce_mem_usage(item)
+    # user, _ = reduce_mem_usage(user)
 
     # * ======================================================================================================================
 
