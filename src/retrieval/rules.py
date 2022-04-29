@@ -245,7 +245,7 @@ class OrderHistoryDecay(PersonalRetrieveRule):
 class ItemPair(PersonalRetrieveRule):
     """Customers who bought this often bought this."""
 
-    def __init__(self, trans_df: pd.DataFrame, item_id: str = "article_id"):
+    def __init__(self, trans_df: pd.DataFrame, item_id: str = "article_id", name="1"):
         """Initialize an `ItemPairRetrieve` instance.
 
         Parameters
@@ -257,6 +257,7 @@ class ItemPair(PersonalRetrieveRule):
         """
         self.iid = item_id
         self.trans_df = trans_df[["customer_id", self.iid]].drop_duplicates()
+        self.name = name
 
     def _get_freq_pair(self) -> pd.DataFrame:
         """Generate dict of frequent item pairs in target transaction dataframe.
@@ -300,7 +301,7 @@ class ItemPair(PersonalRetrieveRule):
         df["hit_rate"] = df["part_sale"] / df["full_sale"]
 
         df[self.iid] = df["pair"].astype("int32")
-        df["method"] = "ItemPairRetrieve" + str(np.random.randint(1, 100))
+        df["method"] = "ItemPairRetrieve" + self.name
 
         df = df[["customer_id", self.iid, "method", "score", "hit_rate"]]
         return df
@@ -319,6 +320,7 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         trans_df: pd.DataFrame,
         cat_cols: List,
         n: int = 12,
+        name: str = "1",
         unique: bool = True,
         item_id: str = "article_id",
     ):
@@ -346,6 +348,7 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         self.cat_cols = cat_cols
         self.unique = unique
         self.n = n
+        self.name = name
 
     def retrieve(self) -> List[int]:
         """Get popular items in the specified time window
@@ -374,7 +377,9 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         )
 
         df["score"] = df["count"]
-        df["method"] = "UGTimeHistory_" + "|".join(self.cat_cols) + "_" + str(self.n)
+        df["method"] = (
+            "UGTimeHistory_" + "|".join(self.cat_cols) + "_" + str(self.n) + self.name
+        )
         df = df[df["rank"] <= self.n][[*self.cat_cols, self.iid, "score", "method"]]
 
         # * ============================================
@@ -498,6 +503,7 @@ class TimeHistory(GlobalRetrieveRule):
         customer_list: List,
         trans_df: pd.DataFrame,
         n: int = 12,
+        name: str = "1",
         unique: bool = True,
         item_id: str = "article_id",
     ):
@@ -519,6 +525,7 @@ class TimeHistory(GlobalRetrieveRule):
         self.trans_df = trans_df[["customer_id", self.iid]]
         self.unique = unique
         self.n = n
+        self.name = name
 
     def retrieve(self) -> List[int]:
         """Get popular items in the specified time window
@@ -539,7 +546,7 @@ class TimeHistory(GlobalRetrieveRule):
         df = df.sort_values(by="count", ascending=False).reset_index(drop=True)
         df["rank"] = df.index + 1
         df["score"] = df["count"]
-        df["method"] = f"TimeHistory_{self.n}"
+        df["method"] = f"TimeHistory_{self.n}_" + self.name
 
         df = df[df["rank"] <= self.n][[self.iid, "score", "method"]]
         df = self.merge(df)

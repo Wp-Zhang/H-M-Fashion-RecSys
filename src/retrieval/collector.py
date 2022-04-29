@@ -74,39 +74,40 @@ class RuleCollector:
                 drop=True
             )
 
-            tmp_items = items.merge(label, on=["customer_id"], how="left")
-            tmp_items = tmp_items[tmp_items["label_item"].notnull()]
-            tmp_items["label"] = tmp_items.apply(
-                lambda x: 1 if x[item_id] in x["label_item"] else 0, axis=1
-            )
-            pos_rate = tmp_items["label"].mean()
-
-            if pos_rate < min_pos_rate:
-                tmp_items["rank"] = tmp_items.groupby("customer_id")["score"].rank(
-                    ascending=False
+            if label.shape[0] != 0:  # * not test set
+                tmp_items = items.merge(label, on=["customer_id"], how="left")
+                tmp_items = tmp_items[tmp_items["label_item"].notnull()]
+                tmp_items["label"] = tmp_items.apply(
+                    lambda x: 1 if x[item_id] in x["label_item"] else 0, axis=1
                 )
+                pos_rate = tmp_items["label"].mean()
 
-                rank = tmp_items["rank"].max()
-                best_pos_rate = pos_rate
-                best_rank = rank
-                # print("=" * 20)
-                while rank > 0:
-                    tmp_pos_rate = tmp_items.loc[
-                        tmp_items["rank"] <= rank, "label"
-                    ].mean()
-                    # print("rank: ", rank, "pos_rate:", tmp_pos_rate)
-                    if tmp_pos_rate > best_pos_rate:
-                        best_pos_rate = tmp_pos_rate
-                        best_rank = rank
-                    if tmp_pos_rate > min_pos_rate:
-                        break
-                    rank -= 1
-                # print("=" * 20)
-                print(f"TOP{best_rank} Positive rate: {best_pos_rate:.5f}")
-                items = tmp_items.loc[tmp_items["rank"] <= best_rank]
-                items.drop(["rank", "label_item", "label"], axis=1, inplace=True)
-            else:
-                print(f"Positive rate: {pos_rate:.5f}")
+                if pos_rate < min_pos_rate:
+                    tmp_items["rank"] = tmp_items.groupby("customer_id")["score"].rank(
+                        ascending=False
+                    )
+
+                    rank = tmp_items["rank"].max()
+                    best_pos_rate = pos_rate
+                    best_rank = rank
+                    # print("=" * 20)
+                    while rank > 0:
+                        tmp_pos_rate = tmp_items.loc[
+                            tmp_items["rank"] <= rank, "label"
+                        ].mean()
+                        # print("rank: ", rank, "pos_rate:", tmp_pos_rate)
+                        if tmp_pos_rate > best_pos_rate:
+                            best_pos_rate = tmp_pos_rate
+                            best_rank = rank
+                        if tmp_pos_rate > min_pos_rate:
+                            break
+                        rank -= 1
+                    # print("=" * 20)
+                    print(f"TOP{best_rank} Positive rate: {best_pos_rate:.5f}")
+                    items = tmp_items.loc[tmp_items["rank"] <= best_rank]
+                    items.drop(["rank", "label_item", "label"], axis=1, inplace=True)
+                else:
+                    print(f"Positive rate: {pos_rate:.5f}")
             # * Merge with previous results
             pred_df = pd.concat([pred_df, items], ignore_index=True)
 
