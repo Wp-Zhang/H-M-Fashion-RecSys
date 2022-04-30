@@ -2,27 +2,47 @@ import pandas as pd
 import numpy as np
 from typing import List
 from tqdm import tqdm
-from .rules import PersonalRetrieveRule, GlobalRetrieveRule, FilterRule
+from .rules import (
+    PersonalRetrieveRule,
+    UserGroupRetrieveRule,
+    GlobalRetrieveRule,
+    FilterRule,
+)
+from sklearn.preprocessing import QuantileTransformer, StandardScaler
 
 
 class RuleCollector:
+    """Collect retrieval candidates by rules"""
+
     def collect(
         self,
+        valid: pd.DataFrame,
         customer_list: np.ndarray,
         rules: List,
         filters: List = None,
+        min_pos_rate: float = 0.01,
         item_id: str = "article_id",
         compress=True,
     ) -> pd.DataFrame:
-        """Use rules to Retrieve items for each user
+        """Collect retreival results
 
-        Args:
-            customer_list (np.ndarray): target customer list
-            rules (List): rules to Retrieve items
-            filter (RetrieveRule, optional): filter to remove some Retrieveed items. Defaults to None.
+        Parameters
+        ----------
+        customer_list : np.ndarray
+            Target customer list.
+        rules : List
+            List of rules to retrieve items.
+        filters : List, optional
+            Filters to remove some retrieved items, by default ``None``.
+        item_id : str, optional
+            Item unit, by default ``"article_id"``.
+        compress : bool, optional
+            Whether to compress the candidate items into a list, by default ``True``.
 
-        Returns:
-            pd.DataFrame: prediction
+        Returns
+        -------
+        pd.DataFrame
+            Dataframe of candidate items.
         """
         # * Check parameters
         customer_list = np.array(customer_list)
@@ -31,6 +51,10 @@ class RuleCollector:
             self._check_filter(filters)
         else:
             filters = []
+
+        # * prepare valid data to calculate positive rate of retrieved items
+        label = valid[["customer_id", item_id]]
+        label.columns = ["customer_id", "label_item"]
 
         # * Get items to be removed.
         rm_items = []
@@ -41,25 +65,54 @@ class RuleCollector:
         pred_df = None
         for rule in tqdm(rules, "Retrieve items by rules"):
             items = rule.retrieve()
-            items = items.loc[~items[item_id].isin(rm_items)].reset_index(drop=True)
+            scaler = QuantileTransformer(output_distribution="normal")
+            items["score"] = scaler.fit_transform(items["score"].values.reshape(-1, 1))
+            items = items.loc[~items[item_id].isin(rm_items)]
 
-            if isinstance(rule, GlobalRetrieveRule):
-                # * add `customer_id` to `GlobalRetrieveRule` results
-                num_item = items.shape[0]
-                num_user = customer_list.shape[0]
+            # * Calculate positive rate
+            items = items.sort_values(by="score", ascending=False).reset_index(
+                drop=True
+            )
 
-                tmp_user = np.repeat(customer_list, num_item)
-                tmp_df = items.iloc[np.tile(np.arange(num_item), num_user)]
-                tmp_df = tmp_df.reset_index(drop=True)
-                tmp_df["customer_id"] = tmp_user
+            if label.shape[0] != 0:  # * not test set
+                tmp_items = items.merge(label, on=["customer_id"], how="left")
+                tmp_items = tmp_items[tmp_items["label_item"].notnull()]
+                tmp_items["label"] = tmp_items.apply(
+                    lambda x: 1 if x[item_id] in x["label_item"] else 0, axis=1
+                )
+                pos_rate = tmp_items["label"].mean()
 
-            else:  # * PersonalRetrieveRule
-                tmp_df = items
+                if pos_rate < min_pos_rate:
+                    tmp_items["rank"] = tmp_items.groupby("customer_id")["score"].rank(
+                        ascending=False
+                    )
 
-            pred_df = pd.concat([pred_df, tmp_df], ignore_index=True)
-
-        # pred_df = pred_df.sort_values(by=["customer_id", "rank"]).reset_index(drop=True)
-        pred_df = pred_df.drop_duplicates(["customer_id", item_id], keep="first")
+                    rank = tmp_items["rank"].max()
+                    best_pos_rate = pos_rate
+                    best_rank = rank
+                    # print("=" * 20)
+                    while rank > 0:
+                        tmp_pos_rate = tmp_items.loc[
+                            tmp_items["rank"] <= rank, "label"
+                        ].mean()
+                        # print("rank: ", rank, "pos_rate:", tmp_pos_rate)
+                        if tmp_pos_rate > best_pos_rate:
+                            best_pos_rate = tmp_pos_rate
+                            best_rank = rank
+                        if tmp_pos_rate > min_pos_rate:
+                            break
+                        rank -= 1
+                    # print("=" * 20)
+                    if best_pos_rate < min_pos_rate:
+                        print("skip")
+                        continue
+                    print(f"TOP{best_rank} Positive rate: {best_pos_rate:.5f}")
+                    items = tmp_items.loc[tmp_items["rank"] <= best_rank]
+                    items.drop(["rank", "label_item", "label"], axis=1, inplace=True)
+                else:
+                    print(f"Positive rate: {pos_rate:.5f}")
+            # * Merge with previous results
+            pred_df = pd.concat([pred_df, items], ignore_index=True)
 
         # * Compress the result.
         if compress:
@@ -78,8 +131,10 @@ class RuleCollector:
     @staticmethod
     def _check_rule(rules: List) -> None:
         for rule in rules:
-            if not isinstance(rule, PersonalRetrieveRule) and not isinstance(
-                rule, GlobalRetrieveRule
+            if (
+                not isinstance(rule, PersonalRetrieveRule)
+                and not isinstance(rule, GlobalRetrieveRule)
+                and not isinstance(rule, UserGroupRetrieveRule)
             ):
                 raise TypeError(
                     "Rule must be `PersonalRetrieveRule` or `GlobalRetrieveRule`"

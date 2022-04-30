@@ -8,6 +8,8 @@ from pathlib import Path
 
 
 class DataHelper:
+    """Helper class for loadiing, preprocessing and saving data."""
+
     def __init__(self, data_dir: str, raw_dir: str = "raw"):
         """Initialize DataHelper.
 
@@ -51,42 +53,50 @@ class DataHelper:
         dict
             Encoded data dictionary, keys: 'item', 'user', 'inter'.
         """
-
         if not os.path.isdir(self.base / map_dir):
             os.mkdir(self.base / map_dir)
+
+        user = data["user"]
+        item = data["item"]
+        inter = data["inter"]
 
         user_id2index_path = self.base / map_dir / "user_id2index.pkl"
         user_index2id_path = self.base / map_dir / "user_index2id.pkl"
         item_id2index_path = self.base / map_dir / "item_id2index.pkl"
         item_index2id_path = self.base / map_dir / "item_index2id.pkl"
 
-        user_id2index_dict = dict(
-            zip(data["user"]["customer_id"], data["user"].index + 1)
-        )
-        user_index2id_dict = dict(
-            zip(data["user"].index + 1, data["user"]["customer_id"])
-        )
-        item_id2index_dict = dict(
-            zip(data["item"]["article_id"], data["item"].index + 1)
-        )
-        item_index2id_dict = dict(
-            zip(data["item"].index + 1, data["item"]["article_id"])
-        )
-        pickle.dump(user_id2index_dict, open(user_id2index_path, "wb"))
-        pickle.dump(user_index2id_dict, open(user_index2id_path, "wb"))
-        pickle.dump(item_id2index_dict, open(item_id2index_path, "wb"))
-        pickle.dump(item_index2id_dict, open(item_index2id_path, "wb"))
+        if not os.path.exists(user_id2index_path):
+            user_id2index_dict = dict(zip(user["customer_id"], user.index + 1))
+            pickle.dump(user_id2index_dict, open(user_id2index_path, "wb"))
+        else:
+            user_id2index_dict = pickle.load(open(user_id2index_path, "rb"))
 
-        data["inter"]["customer_id"] = data["inter"]["customer_id"].map(
-            user_id2index_dict
-        )
-        data["inter"]["article_id"] = data["inter"]["article_id"].map(
-            item_id2index_dict
-        )
-        data["user"]["customer_id"] = data["user"]["customer_id"].map(
-            user_id2index_dict
-        )
-        data["item"]["article_id"] = data["item"]["article_id"].map(item_id2index_dict)
+        if not os.path.exists(user_index2id_path):
+            user_index2id_dict = dict(zip(user.index + 1, user["customer_id"]))
+            pickle.dump(user_index2id_dict, open(user_index2id_path, "wb"))
+        else:
+            user_index2id_dict = pickle.load(open(user_index2id_path, "rb"))
+
+        if not os.path.exists(item_id2index_path):
+            item_id2index_dict = dict(zip(item["article_id"], item.index + 1))
+            pickle.dump(item_id2index_dict, open(item_id2index_path, "wb"))
+        else:
+            item_id2index_dict = pickle.load(open(item_id2index_path, "rb"))
+
+        if not os.path.exists(item_index2id_path):
+            item_index2id_dict = dict(zip(item.index + 1, item["article_id"]))
+            pickle.dump(item_index2id_dict, open(item_index2id_path, "wb"))
+        else:
+            item_index2id_dict = pickle.load(open(item_index2id_path, "rb"))
+
+        inter["customer_id"] = inter["customer_id"].map(user_id2index_dict)
+        inter["article_id"] = inter["article_id"].map(item_id2index_dict)
+        user["customer_id"] = user["customer_id"].map(user_id2index_dict)
+        item["article_id"] = item["article_id"].map(item_id2index_dict)
+
+        data["user"] = user
+        data["item"] = item
+        data["inter"] = inter
 
         return data
 
@@ -201,7 +211,10 @@ class DataHelper:
         return data
 
     def preprocess_data(self, save: bool = True, name: str = "encoded_full") -> dict:
-        """Preprocess raw data.
+        """Preprocess raw data:
+            1. encode ids
+            2. label encode categorical features
+            3. impute
 
         Parameters
         ----------

@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 
 
-def calc_valid_date(week_num: int, last_date: str = "2020-09-22") -> Tuple[str]:
+def calc_valid_date(week_num: int, last_date: str = "2020-09-29") -> Tuple[str]:
     """Calculate start and end date of a given week number.
 
     Parameters
@@ -179,7 +179,7 @@ def reduce_mem_usage(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
 
 
 def merge_week_data(
-    data: Dict, week_num: int, candidates: pd.DataFrame, label: pd.DataFrame
+    data: Dict, week_num: int, candidates: pd.DataFrame
 ) -> pd.DataFrame:
     """Merge transaction, user and item features with week data.
 
@@ -207,37 +207,31 @@ def merge_week_data(
 
     trans = trans.sort_values(by=["t_dat", "customer_id"]).reset_index(drop=True)
     trans_info = (
-        trans[trans["week"] >= week_num]
+        trans[trans["week"] > week_num]
         .groupby(["article_id"], as_index=False)
         .last()
         .drop(columns=["customer_id"])
     )
     trans_info["week"] = week_num
-
-    # candidates = candidates.merge(item[['article_id','product_code']], on='article_id', how='left')
-    # pid_iid = item[["product_code", "article_id"]]
-    # pid_iid.columns = ["product_code", "other_article_id"]
-    # candidates = candidates.merge(pid_iid, on="product_code")
-
-    # candidates.drop(columns=['product_code'], inplace=True)
-    # candidates.rename(columns={"article_id":"origin_article_id", "other_article_id":"article_id"}, inplace=True)
-    # candidates = candidates.drop_duplicates().reset_index(drop=True)
+    trans_info, _ = reduce_mem_usage(trans_info)
+    # item, _ = reduce_mem_usage(item)
+    # user, _ = reduce_mem_usage(user)
 
     # * ======================================================================================================================
 
-    label.columns = ["customer_id", "label_article"]
-    candidates = candidates.merge(label, on=["customer_id"], how="left")
+    if week_num != 0:  # this is not test data
+        start_date, end_date = calc_valid_date(week_num)
+        mask = (start_date <= trans["t_dat"]) & (trans["t_dat"] < end_date)
+        label = trans.loc[mask, ["customer_id", "article_id"]]
+        label["label"] = 1
 
-    candidates = candidates[candidates["label_article"].notnull()]
-    candidates["label"] = candidates.progress_apply(
-        lambda x: 1 if x["article_id"] in x["label_article"] else 0, axis=1
-    )
+        label_customers = label["customer_id"].unique()
+        candidates = candidates[candidates["customer_id"].isin(label_customers)]
 
-    # candidates['label'] = 0
-    # mask = candidates['label_article'].notnull()
-    # candidates.loc[mask, 'label'] = candidates[mask].progress_apply(lambda x: 1 if x['article_id'] in x['label_article'] else 0, axis=1)
-
-    del candidates["label_article"]
+        candidates = candidates.merge(
+            label, on=["customer_id", "article_id"], how="left"
+        )
+        candidates["label"] = candidates["label"].fillna(0)
 
     # * ======================================================================================================================
 

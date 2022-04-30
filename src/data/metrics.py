@@ -30,7 +30,7 @@ def _rk(actual, predicted, k=10):
 
 
 def map_at_k(actual: Iterable, predicted: Iterable, k: int = 12) -> float:
-    """Calculate mean average precision at k.
+    """Compute mean average precision @ k.
 
     Parameters
     ----------
