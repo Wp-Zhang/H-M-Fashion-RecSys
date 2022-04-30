@@ -367,9 +367,7 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         )
 
         df["score"] = df["count"]
-        df["method"] = (
-            "UGTimeHistory_" + "|".join(self.cat_cols) + "_" + str(self.n) + self.name
-        )
+        df["method"] = "UGTimeHistory_" + self.name
         df = df[df["rank"] <= self.n][[*self.cat_cols, self.iid, "score", "method"]]
 
         df = self.merge(df)
