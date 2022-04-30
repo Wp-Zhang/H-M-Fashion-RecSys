@@ -15,7 +15,7 @@ class PersonalRetrieveRule(ABC):
         """Retrieve items
 
         Returns:
-            pd.DataFrame: (customer_id, article_id, method, score, user_ratio)
+            pd.DataFrame: (customer_id, article_id, method, score)
         """
 
 
@@ -103,9 +103,10 @@ class OrderHistory(PersonalRetrieveRule):
         trans_df: pd.DataFrame,
         days: int = 7,
         n: int = None,
+        name: str = "1",
         item_id: str = "article_id",
     ):
-        """Initialize an `OrderHistory` instance.
+        """Initialize OrderHistory.
 
         Parameters
         ----------
@@ -114,7 +115,9 @@ class OrderHistory(PersonalRetrieveRule):
         days : int, optional
             Length of time window when getting user buying history, by default ``7``.
         n : int, optional
-            Get top `n` recently bought items, by default ``12``.
+            Get top `n` recently bought items, by default ``None``.
+        name : str, optional
+            Name of the rule, by default ``1``.
         item_id : str, optional
             Name of item id, by default ``"article_id"``.
         """
@@ -122,6 +125,7 @@ class OrderHistory(PersonalRetrieveRule):
         self.trans_df = trans_df[["t_dat", "customer_id", item_id]]
         self.days = days
         self.n = n
+        self.name = name
 
     def retrieve(self) -> pd.DataFrame:
         df = self.trans_df.reset_index()
@@ -144,38 +148,44 @@ class OrderHistory(PersonalRetrieveRule):
         )
         res["score"] = -res["diff_dat"]
 
-        full_sale = res.groupby(["customer_id"])[self.iid].count().reset_index()
-        full_sale.columns = ["customer_id", "full_sale"]
-
         if self.n is not None:
             res = res.loc[res["rank"] <= self.n]
-            res["method"] = f"OrderHistory_{self.days}_top{self.n}"
-        else:
-            res["method"] = f"OrderHistory_{self.days}"
 
-        part_sale = res.groupby(["customer_id"])[self.iid].count().reset_index()
-        part_sale.columns = ["customer_id", "part_sale"]
-
-        res = res.merge(full_sale, on=["customer_id"], how="left")
-        res = res.merge(part_sale, on=["customer_id"], how="left")
-        res["hit_rate"] = res["part_sale"] / res["full_sale"]
-        # * `hit_rate` will be 1 if `n` is not set
-
-        res = res[["customer_id", self.iid, "score", "method", "hit_rate"]]
+        res["method"] = f"OrderHistory_{self.name}"
+        res = res[["customer_id", self.iid, "score", "method"]]
 
         return res
 
 
 class OrderHistoryDecay(PersonalRetrieveRule):
+    """Retrieve recently bought items by the customer with decay."""
+
     def __init__(
         self,
-        trans_df,
+        trans_df: pd.DataFrame,
         days: int = 7,
         n: int = None,
+        name: str = "1",
         item_id: str = "article_id",
     ):
+        """Initialize OrderHistoryDecay.
+
+        Parameters
+        ----------
+        trans_df : pd.DataFrame
+            Dataframe of transaction records.
+        days : int, optional
+            Length of time window when getting user buying history, by default ``7``.
+        n : int, optional
+            Get top `n` recently bought items, by default ``None``.
+        name : str, optional
+            Name of the rule, by default ``1``.
+        item_id : str, optional
+            Name of item id, by default ``"article_id"``.
+        """
         self.iid = item_id
         self.trans_df = trans_df[["customer_id", self.iid, "t_dat"]]
+        self.name = name
         self.days = days
         self.n = n
 
@@ -220,24 +230,13 @@ class OrderHistoryDecay(PersonalRetrieveRule):
         )
         df["score"] = df["value"]
 
-        full_sale = df.groupby(["customer_id"])[self.iid].count().reset_index()
-        full_sale.columns = ["customer_id", "full_sale"]
-
         df = df[df["value"] > 150]
+
         if self.n is not None:
             df = df[df["rank"] <= self.n]
-            df["method"] = f"OrderHistoryDecay_{self.days}_top{self.n}"
-        else:
-            df["method"] = f"OrderHistoryDecay_{self.days}"
+        df["method"] = f"OrderHistoryDecay_{self.name}"
 
-        part_sale = df.groupby(["customer_id"])[self.iid].count().reset_index()
-        part_sale.columns = ["customer_id", "part_sale"]
-
-        df = df.merge(full_sale, on=["customer_id"], how="left")
-        df = df.merge(part_sale, on=["customer_id"], how="left")
-        df["hit_rate"] = df["part_sale"] / df["full_sale"]
-
-        df = df[["customer_id", self.iid, "score", "method", "hit_rate"]]
+        df = df[["customer_id", self.iid, "score", "method"]]
 
         return df
 
@@ -245,13 +244,17 @@ class OrderHistoryDecay(PersonalRetrieveRule):
 class ItemPair(PersonalRetrieveRule):
     """Customers who bought this often bought this."""
 
-    def __init__(self, trans_df: pd.DataFrame, item_id: str = "article_id", name="1"):
-        """Initialize an `ItemPairRetrieve` instance.
+    def __init__(
+        self, trans_df: pd.DataFrame, name: str = "1", item_id: str = "article_id"
+    ):
+        """Initialize ItemPair.
 
         Parameters
         ----------
         trans_df : pd.DataFrame
             Dataframe of transaction records.
+        name: str, optional
+            Name of the rule, by default ``1``.
         item_id : str, optional
             Name of item id, by default ``"article_id"``.
         """
@@ -287,23 +290,13 @@ class ItemPair(PersonalRetrieveRule):
         df = self.trans_df
         df = df.merge(pair, on=self.iid, how="left")
 
-        full_sale = df.groupby(["customer_id"])[self.iid].count().reset_index()
-        full_sale.columns = ["customer_id", "full_sale"]
-
         df = df.loc[df["pair"].notnull()]
         df = df.drop_duplicates(["customer_id", "pair"])
 
-        part_sale = df.groupby(["customer_id"])["pair"].count().reset_index()
-        part_sale.columns = ["customer_id", "part_sale"]
-
-        df = df.merge(full_sale, on=["customer_id"], how="left")
-        df = df.merge(part_sale, on=["customer_id"], how="left")
-        df["hit_rate"] = df["part_sale"] / df["full_sale"]
-
         df[self.iid] = df["pair"].astype("int32")
-        df["method"] = "ItemPairRetrieve" + self.name
+        df["method"] = "ItemPairRetrieve_" + self.name
 
-        df = df[["customer_id", self.iid, "method", "score", "hit_rate"]]
+        df = df[["customer_id", self.iid, "method", "score"]]
         return df
 
 
@@ -330,12 +323,16 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         ----------
         data : Dict
             Data dictionary.
+        customer_list : List
+            List of target customer ids.
         trans_df : pd.DataFrame
             Dataframe of transaction records.
         cat_cols: List
             Name of user group columns.
         n : int, optional
             Get top `n` popular items, by default ``12``.
+        name : str, optional
+            Name of the rule, by default ``1``.
         unique : bool, optional
             Whether to drop duplicate buying records, by default ``True``.
         item_id : str, optional
@@ -360,13 +357,6 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         if self.unique:
             df = df.drop_duplicates(["customer_id", self.iid])
 
-        full_sale = df.groupby([*self.cat_cols, "customer_id"])[self.iid].count()
-        full_sale = full_sale.reset_index()
-        full_sale.columns = [*self.cat_cols, "customer_id", "full_sale"]
-        user_item_map = df[["customer_id", self.iid]].drop_duplicates()
-
-        # * =============================================
-
         df["count"] = 1
         df = df.groupby([*self.cat_cols, self.iid], as_index=False)["count"].sum()
         df = df.sort_values(by="count", ascending=False).reset_index(drop=True)
@@ -382,20 +372,9 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         )
         df = df[df["rank"] <= self.n][[*self.cat_cols, self.iid, "score", "method"]]
 
-        # * ============================================
         df = self.merge(df)
 
-        part_sale = df.merge(user_item_map, on=["customer_id", self.iid], how="inner")
-        part_sale = part_sale.groupby([*self.cat_cols, "customer_id"])[self.iid].count()
-        part_sale = part_sale.reset_index()
-        part_sale.columns = [*self.cat_cols, "customer_id", "part_sale"]
-
-        df = df.merge(full_sale, on=[*self.cat_cols, "customer_id"], how="left")
-        df = df.merge(part_sale, on=[*self.cat_cols, "customer_id"], how="left")
-        df["hit_rate"] = df["part_sale"] / df["full_sale"]
-        df["hit_rate"] = df["hit_rate"].fillna(0)
-
-        return df[["customer_id", self.iid, "method", "score", "hit_rate"]]
+        return df[["customer_id", self.iid, "method", "score"]]
 
 
 class UserGroupSaleTrend(UserGroupRetrieveRule):
@@ -409,6 +388,7 @@ class UserGroupSaleTrend(UserGroupRetrieveRule):
         cat_cols: List,
         days: int = 7,
         n: int = 12,
+        name: str = "1",
         t: float = 0.8,
         item_id: str = "article_id",
     ):
@@ -416,18 +396,24 @@ class UserGroupSaleTrend(UserGroupRetrieveRule):
 
         Parameters
         ----------
+        data : Dict
+            Data dictionary.
+        customer_list : List
+            List of target customer ids.
         trans_df : pd.DataFrame
-            _description_
+            Dataframe of transaction records.
         cat_cols : List
-            _description_
+            Name of user group columns.
         days : int, optional
-            _description_, by default 7
+            Length of time window when calculating sale trend, by default ``7``.
         n : int, optional
-            _description_, by default 12
+            Get top `n` recently bought items, by default ``12``.
+        name : str, optional
+            Name of the rule, by default ``1``.
         t : float, optional
-            _description_, by default 0.8
+            Sale trend ratio, by default ``0.8``.
         item_id : str, optional
-            _description_, by default "article_id"
+            Name of item id, by default ``"article_id"``.
         """
         self.iid = item_id
         self.data = data
@@ -437,6 +423,7 @@ class UserGroupSaleTrend(UserGroupRetrieveRule):
         self.days = days
         self.n = n
         self.t = t
+        self.name = name
 
     def retrieve(self):
         item_sale = self.trans_df
@@ -446,11 +433,6 @@ class UserGroupSaleTrend(UserGroupRetrieveRule):
         item_sale = item_sale[item_sale["dat_gap"] <= 2 * self.days - 1]
         group_a = item_sale[item_sale["dat_gap"] > self.days - 1]
         group_b = item_sale[item_sale["dat_gap"] <= self.days - 1]
-
-        full_sale = item_sale.groupby([*self.cat_cols, "customer_id"])[self.iid].count()
-        full_sale = full_sale.reset_index()
-        full_sale.columns = [*self.cat_cols, "customer_id", "full_sale"]
-        user_item_map = item_sale[["customer_id", self.iid]].drop_duplicates()
 
         group_a["count"] = 1
         group_b["count"] = 1
@@ -473,23 +455,13 @@ class UserGroupSaleTrend(UserGroupRetrieveRule):
         )
         log = log[log["rank"] <= self.n]
 
-        log["method"] = f"UGSaleTrend_{self.days}_top{self.n}"
+        log["method"] = f"UGSaleTrend_{self.name}"
         log["score"] = log["trend"]
         log = log[[*self.cat_cols, self.iid, "method", "score"]]
 
         log = self.merge(log)
 
-        part_sale = log.merge(user_item_map, on=["customer_id", self.iid], how="inner")
-        part_sale = part_sale.groupby([*self.cat_cols, "customer_id"])[self.iid].count()
-        part_sale = part_sale.reset_index()
-        part_sale.columns = [*self.cat_cols, "customer_id", "part_sale"]
-
-        log = log.merge(full_sale, on=[*self.cat_cols, "customer_id"], how="left")
-        log = log.merge(part_sale, on=[*self.cat_cols, "customer_id"], how="left")
-        log["hit_rate"] = log["part_sale"] / log["full_sale"]
-        log["hit_rate"] = log["hit_rate"].fillna(0)
-
-        return log[["customer_id", self.iid, "method", "score", "hit_rate"]]
+        return log[["customer_id", self.iid, "method", "score"]]
 
 
 # * ======================== Global Retrieve Rules ======================== *
@@ -511,6 +483,8 @@ class TimeHistory(GlobalRetrieveRule):
 
         Parameters
         ----------
+        customer_list : List
+            List of target customer ids.
         trans_df : pd.DataFrame
             Dataframe of transaction records.
         n : int, optional
@@ -537,46 +511,54 @@ class TimeHistory(GlobalRetrieveRule):
         if self.unique:
             df = df.drop_duplicates(["customer_id", self.iid])
 
-        full_sale = df.groupby("customer_id")[self.iid].count().reset_index()
-        full_sale.columns = ["customer_id", "full_sale"]
-        user_item_map = df[["customer_id", self.iid]].drop_duplicates()
-
         df["count"] = 1
         df = df.groupby(self.iid, as_index=False)["count"].sum()
         df = df.sort_values(by="count", ascending=False).reset_index(drop=True)
         df["rank"] = df.index + 1
         df["score"] = df["count"]
-        df["method"] = f"TimeHistory_{self.n}_" + self.name
+        df["method"] = "TimeHistory_" + self.name
 
         df = df[df["rank"] <= self.n][[self.iid, "score", "method"]]
         df = self.merge(df)
 
-        part_sale = df.merge(user_item_map, on=["customer_id", self.iid], how="inner")
-        part_sale = part_sale.groupby("customer_id")[self.iid].count().reset_index()
-        part_sale.columns = ["customer_id", "part_sale"]
-
-        df = df.merge(full_sale, on="customer_id", how="left")
-        df = df.merge(part_sale, on="customer_id", how="left")
-        df["hit_rate"] = df["part_sale"] / df["full_sale"]
-        df["hit_rate"] = df["hit_rate"].fillna(0)
-
-        return df[["customer_id", self.iid, "method", "score", "hit_rate"]]
+        return df[["customer_id", self.iid, "method", "score"]]
 
 
 class TimeHistoryDecay(GlobalRetrieveRule):
+    """Retrieve popular items in specified time window with decay."""
+
     def __init__(
         self,
         customer_list: List,
         trans_df: pd.DataFrame,
-        days=7,
-        n=12,
+        days: int = 7,
+        n: int = 12,
+        name: str = "1",
         item_id: str = "article_id",
     ):
+        """Initialize TimeHistoryDecay.
+
+        Parameters
+        ----------
+        customer_list : List
+            List of target customer ids.
+        trans_df : pd.DataFrame
+            Dataframe of transaction records.
+        days : int, optional
+            Length of time window, by default ``7``.
+        n : int, optional
+            Get top `n` recently bought items, by default ``12``.
+        name : str, optional
+            Name of the rule, by default ``1``.
+        item_id : str, optional
+            Name of item id, by default ``"article_id"``.
+        """
         self.iid = item_id
         self.customer_list = customer_list
         self.trans_df = trans_df[["customer_id", self.iid, "t_dat"]]
         self.days = days
         self.n = n
+        self.name = name
 
     def retrieve(self):
         df = self.trans_df
@@ -610,29 +592,17 @@ class TimeHistoryDecay(GlobalRetrieveRule):
         df["value"][df["value"] < 0] = 0
         df["value"] = df["value"] * df["quotient"]
 
-        full_sale = df.groupby("customer_id")[self.iid].count().reset_index()
-        full_sale.columns = ["customer_id", "full_sale"]
-        user_item_map = df[["customer_id", self.iid]].drop_duplicates()
-
         df = df.groupby([self.iid], as_index=False)["value"].sum()
         df = df.sort_values(by="value", ascending=False).reset_index(drop=True)
 
         df["rank"] = df.index + 1
         df["score"] = df["value"]
         df = df[df["rank"] <= self.n]
-        df["method"] = f"TimeHistoryDecay_{self.days}_top{self.n}"
+        df["method"] = f"TimeHistoryDecay_{self.name}"
 
         df = self.merge(df)
 
-        part_sale = df.merge(user_item_map, on=["customer_id", self.iid], how="inner")
-        part_sale = part_sale.groupby("customer_id")[self.iid].count().reset_index()
-        part_sale.columns = ["customer_id", "part_sale"]
-
-        df = df.merge(full_sale, on="customer_id", how="left")
-        df = df.merge(part_sale, on="customer_id", how="left")
-        df["hit_rate"] = df["part_sale"] / df["full_sale"]
-
-        return df[["customer_id", self.iid, "score", "method", "hit_rate"]]
+        return df[["customer_id", self.iid, "score", "method"]]
 
 
 class SaleTrend(GlobalRetrieveRule):
@@ -644,6 +614,7 @@ class SaleTrend(GlobalRetrieveRule):
         trans_df: pd.DataFrame,
         days: int = 7,
         n: int = 12,
+        name: str = "1",
         t: float = 0.8,
         item_id: str = "article_id",
     ):
@@ -651,16 +622,20 @@ class SaleTrend(GlobalRetrieveRule):
 
         Parameters
         ----------
+        customer_list : List
+            List of target customer ids.
         trans_df : pd.DataFrame
-            _description_
+            Dataframe of transaction records.
         days : int, optional
-            _description_, by default 7
+            Length of time window when calculating sale trend, by default ``7``.
         n : int, optional
-            _description_, by default 12
+            Get top `n` recently bought items, by default ``12``.
+        name : str, optional
+            Name of the rule, by default ``1``.
         t : float, optional
-            _description_, by default 0.8
+            Sale trend ratio, by default ``0.8``.
         item_id : str, optional
-            _description_, by default "article_id"
+            Name of item id, by default ``"article_id"``.
         """
         self.iid = item_id
         self.customer_list = customer_list
@@ -668,6 +643,7 @@ class SaleTrend(GlobalRetrieveRule):
         self.days = days
         self.n = n
         self.t = t
+        self.name = name
 
     def retrieve(self):
         item_sale = self.trans_df
@@ -677,10 +653,6 @@ class SaleTrend(GlobalRetrieveRule):
         item_sale = item_sale[item_sale["dat_gap"] <= 2 * self.days - 1]
         group_a = item_sale[item_sale["dat_gap"] > self.days - 1]
         group_b = item_sale[item_sale["dat_gap"] <= self.days - 1]
-
-        full_sale = item_sale.groupby("customer_id")[self.iid].count().reset_index()
-        full_sale.columns = ["customer_id", "full_sale"]
-        user_item_map = item_sale[["customer_id", self.iid]].drop_duplicates()
 
         group_a["count"] = 1
         group_b["count"] = 1
@@ -695,21 +667,13 @@ class SaleTrend(GlobalRetrieveRule):
         log = log.sort_values(by=["count_x", "trend"], ascending=False)
         log = log.reset_index(drop=True).iloc[: self.n]
 
-        log["method"] = f"SaleTrend_{self.days}_top{self.n}"
+        log["method"] = f"SaleTrend_{self.name}"
         log["score"] = log["trend"]
         log = log[[self.iid, "method", "score"]]
 
         log = self.merge(log)
 
-        part_sale = log.merge(user_item_map, on=["customer_id", self.iid], how="inner")
-        part_sale = part_sale.groupby("customer_id")[self.iid].count().reset_index()
-        part_sale.columns = ["customer_id", "part_sale"]
-        log = log.merge(full_sale, on="customer_id", how="left")
-        log = log.merge(part_sale, on="customer_id", how="left")
-        log["hit_rate"] = log["part_sale"] / log["full_sale"]
-        log["hit_rate"].fillna(0, inplace=True)
-
-        return log[["customer_id", self.iid, "score", "method", "hit_rate"]]
+        return log[["customer_id", self.iid, "score", "method"]]
 
 
 # * ============================ Filter Rules ============================ *
@@ -719,7 +683,7 @@ class OutOfStock(FilterRule):
     """Filter items that are out of stock."""
 
     def __init__(self, trans_df: pd.DataFrame, item_id: str = "article_id"):
-        """Initialize an `OutOfStock` instance.
+        """Initialize OutOfStock.
 
         Parameters
         ----------
