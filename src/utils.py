@@ -179,7 +179,7 @@ def reduce_mem_usage(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
 
 
 def merge_week_data(
-    data: Dict, week_num: int, candidates: pd.DataFrame, label: pd.DataFrame
+    data: Dict, week_num: int, candidates: pd.DataFrame
 ) -> pd.DataFrame:
     """Merge transaction, user and item features with week data.
 
@@ -219,20 +219,19 @@ def merge_week_data(
 
     # * ======================================================================================================================
 
-    if label is not None:  # * label is None means this is the test data
-        label.columns = ["customer_id", "label_article"]
-        candidates = candidates.merge(label, on=["customer_id"], how="left")
+    if week_num != 0:  # this is not test data
+        start_date, end_date = calc_valid_date(week_num)
+        mask = (start_date <= trans["t_dat"]) & (trans["t_dat"] < end_date)
+        label = trans.loc[mask, ["customer_id", "article_id"]]
+        label["label"] = 1
 
-        candidates = candidates[candidates["label_article"].notnull()]
-        candidates["label"] = candidates.progress_apply(
-            lambda x: 1 if x["article_id"] in x["label_article"] else 0, axis=1
+        label_customers = label["customer_id"].unique()
+        candidates = candidates[candidates["customer_id"].isin(label_customers)]
+
+        candidates = candidates.merge(
+            label, on=["customer_id", "article_id"], how="left"
         )
-
-        # candidates['label'] = 0
-        # mask = candidates['label_article'].notnull()
-        # candidates.loc[mask, 'label'] = candidates[mask].progress_apply(lambda x: 1 if x['article_id'] in x['label_article'] else 0, axis=1)
-
-        del candidates["label_article"]
+        candidates["label"] = candidates["label"].fillna(0)
 
     # * ======================================================================================================================
 

@@ -103,6 +103,9 @@ class RuleCollector:
                             break
                         rank -= 1
                     # print("=" * 20)
+                    if best_pos_rate < min_pos_rate:
+                        print("skip")
+                        continue
                     print(f"TOP{best_rank} Positive rate: {best_pos_rate:.5f}")
                     items = tmp_items.loc[tmp_items["rank"] <= best_rank]
                     items.drop(["rank", "label_item", "label"], axis=1, inplace=True)
