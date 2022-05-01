@@ -133,11 +133,14 @@ def reduce_mem_usage(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
                 df[col].fillna(mn - 1, inplace=True)
 
             # test if column can be converted to an integer
-            asint = df[col].fillna(0).astype(np.int64)
-            result = df[col] - asint
-            result = result.sum()
-            if result > -0.01 and result < 0.01:
+            if pd.api.types.is_integer_dtype(df[col]):
                 IsInt = True
+            else:
+                asint = df[col].fillna(0).astype(np.int64)
+                result = df[col] - asint
+                result = result.sum()
+                if result > -0.01 and result < 0.01:
+                    IsInt = True
 
             # Make Integer/unsigned Integer datatypes
             if IsInt:
@@ -223,6 +226,7 @@ def merge_week_data(
         start_date, end_date = calc_valid_date(week_num)
         mask = (start_date <= trans["t_dat"]) & (trans["t_dat"] < end_date)
         label = trans.loc[mask, ["customer_id", "article_id"]]
+        label = label.drop_duplicates(["customer_id", "article_id"])
         label["label"] = 1
 
         label_customers = label["customer_id"].unique()
@@ -260,3 +264,39 @@ def merge_week_data(
     candidates, _ = reduce_mem_usage(candidates)
 
     return candidates
+
+
+def calc_embd_similarity(
+    candidate: pd.DataFrame, user_embd: np.ndarray, item_embd: np.ndarray
+) -> np.ndarray:
+    """Calculate user-item embedding similarity.
+
+    Parameters
+    ----------
+    candidate : pd.DataFrame
+        DataFrame of candidate items for one week.
+    user_embd : np.ndarray
+        Pre-trained user embedding.
+    item_embd : np.ndarray
+        Pre-trained item embedding.
+
+    Returns
+    -------
+    np.ndarray
+        Similarity array.
+    """
+    # * maybe add embedding statistic info like std, mean, etc?
+    sim = np.zeros(candidate.shape[0])
+    batch_size = 10000
+    for batch in tqdm(range(0, candidate.shape[0], batch_size)):
+        tmp_users = (
+            candidate.loc[batch : batch + batch_size - 1, "customer_id"].values - 1
+        )
+        tmp_items = (
+            candidate.loc[batch : batch + batch_size - 1, "article_id"].values - 1
+        )
+        tmp_user_embd = np.expand_dims(user_embd[tmp_users], 1)  # (batch_size, 1, dim)
+        tmp_item_embd = np.expand_dims(item_embd[tmp_items], 2)  # (batch_size, dim, 1)
+        tmp_sim = np.einsum("ijk,ikj->ij", tmp_user_embd, tmp_item_embd)
+        sim[batch : batch + batch_size] = tmp_sim.reshape(-1)
+    return sim
