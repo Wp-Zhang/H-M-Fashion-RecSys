@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
-from typing import List
+from typing import List, Dict
 from tqdm import tqdm
 from sklearn.preprocessing import QuantileTransformer
+from ..utils import calc_valid_date
 
 
 class RuleCollector:
@@ -10,7 +11,8 @@ class RuleCollector:
 
     def collect(
         self,
-        valid: pd.DataFrame,
+        week_num: int,
+        trans_df: pd.DataFrame,
         customer_list: np.ndarray,
         rules: List,
         filters: List = [],
@@ -22,8 +24,10 @@ class RuleCollector:
 
         Parameters
         ----------
-        valid : pd.DataFrame
-            Valid set.
+        week_num : int
+            Week number.
+        trans_df : pd.DataFrame
+            Transaction dataframe.
         customer_list : np.ndarray
             Target customer list.
         rules : List
@@ -45,8 +49,11 @@ class RuleCollector:
         customer_list = np.array(customer_list)
 
         # * prepare valid data to calculate positive rate of retrieved items
-        label = valid[["customer_id", item_id]]
-        label.columns = ["customer_id", "label_item"]
+        start_date, end_date = calc_valid_date(week_num)
+        mask = (start_date <= trans_df["t_dat"]) & (trans_df["t_dat"] < end_date)
+        label = trans_df.loc[mask, ["customer_id", "article_id"]]
+        label = label.drop_duplicates(["customer_id", "article_id"])
+        label["label"] = 1
 
         # * Get items to be removed.
         rm_items = []
@@ -61,23 +68,22 @@ class RuleCollector:
             items["score"] = scaler.fit_transform(items["score"].values.reshape(-1, 1))
             items = items.loc[~items[item_id].isin(rm_items)]
 
-            # * Calculate positive rate
-            items = items.sort_values(by="score", ascending=False).reset_index(
-                drop=True
-            )
-
             if label.shape[0] != 0:
                 # * not test set, calculate the positive rate
-                tmp_items = items.merge(label, on=["customer_id"], how="left")
-                tmp_items = tmp_items[tmp_items["label_item"].notnull()]
-                tmp_items["label"] = tmp_items.apply(
-                    lambda x: 1 if x[item_id] in x["label_item"] else 0, axis=1
+                label_customers = label["customer_id"].unique()
+                tmp_items = items[items["customer_id"].isin(label_customers)]
+                tmp_items = tmp_items.merge(
+                    label, on=["customer_id", "article_id"], how="left"
                 )
+                tmp_items["label"] = tmp_items["label"].fillna(0)
                 pos_rate = tmp_items["label"].mean()
 
                 # * if the positive rate is too low, we need to find the `n` that
                 # * has the highest positive rate.
                 if pos_rate < min_pos_rate:
+                    tmp_items = tmp_items.sort_values(by="score", ascending=False)
+                    # tmp_items = tmp_items.reset_index(drop=True).reset_index()
+                    # tmp_items["rank"] = tmp_items.groupby("customer_id")["index"].rank()
                     tmp_items["rank"] = tmp_items.groupby("customer_id")["score"].rank(
                         ascending=False
                     )
@@ -103,7 +109,7 @@ class RuleCollector:
 
                     print(f"TOP{best_rank} Positive rate: {best_pos_rate:.5f}")
                     items = tmp_items.loc[tmp_items["rank"] <= best_rank]
-                    items.drop(["rank", "label_item", "label"], axis=1, inplace=True)
+                    items.drop(["rank", "label"], axis=1, inplace=True)
                 else:
                     print(f"Positive rate: {pos_rate:.5f}")
 
