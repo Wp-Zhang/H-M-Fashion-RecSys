@@ -4,6 +4,9 @@ from abc import ABC, abstractmethod
 from typing import List, Dict
 from tqdm import tqdm
 
+import implicit
+from scipy.sparse import coo_matrix
+
 # * scores of rules are the bigger the better
 
 
@@ -298,6 +301,398 @@ class ItemPair(PersonalRetrieveRule):
 
         df = df[["customer_id", self.iid, "method", "score"]]
         return df
+
+
+class ALS(PersonalRetrieveRule):
+    """ALS Collaborative Filtering."""
+
+    def __init__(
+        self,
+        customer_list: List,
+        trans_df: pd.DataFrame,
+        n: int = 12,
+        name: str = "1",
+        item_id: str = "article_id",
+        num_items: int = 105542,
+    ):
+        """Initialize ALS.
+
+        Parameters
+        ----------
+        customer_list : List
+            List of target customer ids.
+        trans_df : pd.DataFrame
+            Dataframe of transaction records.
+        n : int, optional
+            Get top `n` recently bought items, by default ``12``.
+        name: str, optional
+            Name of the rule, by default ``1``.
+        item_id : str, optional
+            Name of item id, by default ``"article_id"``.
+        num_items: int, optional
+            Number of unique items in the whole dataset, by default ``105542``.
+        """
+        self.customer_list = customer_list
+        self.iid = item_id
+        self.n = n
+        self.trans_df = trans_df[["customer_id", self.iid]].drop_duplicates()
+        self.name = name
+        self.num_items = num_items
+
+    def _to_user_item_coo(self, df: pd.DataFrame):
+        """Turn a dataframe with transactions into a COO sparse items x users matrix"""
+        row = df["customer_id"].values - 1  # * input id starts from 1
+        col = df[self.iid].values - 1  # * input id starts from 1
+        data = np.ones(df.shape[0])
+        coo = coo_matrix((data, (row, col)), shape=(1371980, self.num_items))
+        return coo
+
+    def _train(self, coo_train, factors=500, iter_num=3, reg=0.01, verbose=False):
+        model = implicit.als.AlternatingLeastSquares(
+            factors=factors,
+            iterations=iter_num,
+            regularization=reg,
+            random_state=42,
+        )
+        model.fit(coo_train, show_progress=verbose)
+        return model
+
+    def _predict(self, model, uids, coo_train):
+        preds = np.zeros((uids.shape[0], self.n))
+        scores = np.zeros((uids.shape[0], self.n))
+        batch_size = 10000
+        for startidx in range(0, len(uids), batch_size):
+            batch = uids[startidx : startidx + batch_size] - 1
+            ids, batch_scores = model.recommend(
+                batch, coo_train[batch], N=self.n, filter_already_liked_items=False
+            )
+            preds[startidx : startidx + batch_size] = ids + 1
+            scores[startidx : startidx + batch_size] = batch_scores
+
+        candidates = pd.DataFrame(
+            {
+                "customer_id": np.repeat(uids, self.n),
+                "article_id": preds.reshape(-1),
+                "method": "ALS_" + self.name,
+                "score": scores.reshape(-1),
+            }
+        )
+
+        return candidates
+
+    def retrieve(self) -> pd.DataFrame:
+        coo = self._to_user_item_coo(self.trans_df)
+        coo = coo.tocsr()
+
+        model = self._train(coo)
+        candidates = self._predict(model, self.customer_list, coo)
+        return candidates
+
+
+class UserGroupALS(PersonalRetrieveRule):
+    """ALS Collaborative Filtering for each group of users."""
+
+    def __init__(
+        self,
+        data: Dict,
+        customer_list: List,
+        trans_df: pd.DataFrame,
+        cat_col: str,
+        n: int = 12,
+        name: str = "1",
+        item_id: str = "article_id",
+        num_items: int = 105542,
+    ):
+        """Initialize UserGroupALS.
+
+        Parameters
+        ----------
+        data : Dict
+            Dict of dataframes.
+        customer_list : List
+            List of target customer ids.
+        trans_df : pd.DataFrame
+            Dataframe of transaction records.
+        cat_col: str
+            Name of user group column.
+        n : int, optional
+            Get top `n` recently bought items, by default ``12``.
+        name: str, optional
+            Name of the rule, by default ``1``.
+        item_id : str, optional
+            Name of item id, by default ``"article_id"``.
+        num_items: int, optional
+            Number of unique items in the whole dataset, by default ``105542``.
+        """
+        self.data = data
+        self.customer_list = customer_list
+        self.iid = item_id
+        self.n = n
+        if cat_col not in trans_df.columns:
+            self.trans_df = trans_df[["customer_id", self.iid]]
+            user_info = data["user"][["customer_id", cat_col]]
+            self.trans_df = self.trans_df.merge(user_info, on="customer_id", how="left")
+        else:
+            self.trans_df = trans_df[["customer_id", self.iid, cat_col]]
+
+        self.trans_df = self.trans_df[
+            ["customer_id", self.iid, cat_col]
+        ].drop_duplicates()
+        self.cat_col = cat_col
+        self.name = name
+        self.num_items = num_items
+
+    def _to_user_item_coo(self, df: pd.DataFrame):
+        """Turn a dataframe with transactions into a COO sparse items x users matrix"""
+        row = df["customer_id"].values - 1  # * input id starts from 1
+        col = df[self.iid].values - 1  # * input id starts from 1
+        data = np.ones(df.shape[0])
+        coo = coo_matrix((data, (row, col)), shape=(1371980, self.num_items))
+        return coo
+
+    def _train(self, coo_train, factors=200, iter_num=3, reg=0.01, verbose=False):
+        model = implicit.als.AlternatingLeastSquares(
+            factors=factors,
+            iterations=iter_num,
+            regularization=reg,
+            random_state=42,
+        )
+        model.fit(coo_train, show_progress=verbose)
+        return model
+
+    def _predict(self, model, uids, coo_train):
+        preds = np.zeros((uids.shape[0], self.n))
+        scores = np.zeros((uids.shape[0], self.n))
+        batch_size = 10000
+        for startidx in range(0, len(uids), batch_size):
+            batch = uids[startidx : startidx + batch_size] - 1
+            ids, batch_scores = model.recommend(
+                batch, coo_train[batch], N=self.n, filter_already_liked_items=False
+            )
+            preds[startidx : startidx + batch_size] = ids + 1
+            scores[startidx : startidx + batch_size] = batch_scores
+
+        candidates = pd.DataFrame(
+            {
+                "customer_id": np.repeat(uids, self.n),
+                "article_id": preds.reshape(-1),
+                "method": "UGALS_" + self.name,
+                "score": scores.reshape(-1),
+            }
+        )
+
+        return candidates
+
+    def retrieve(self) -> pd.DataFrame:
+        res = None
+        user_info = pd.DataFrame({"customer_id": self.customer_list})
+        user_info = user_info.merge(
+            self.data["user"][["customer_id", self.cat_col]],
+            on="customer_id",
+            how="left",
+        )
+        for value in self.trans_df[self.cat_col].unique():
+            tmp_df = self.trans_df[self.trans_df[self.cat_col] == value]
+            coo = self._to_user_item_coo(tmp_df)
+            coo = coo.tocsr()
+            model = self._train(coo)
+            uids = user_info.loc[user_info[self.cat_col] == value, "customer_id"].values
+            candidates = self._predict(model, uids, coo)
+            res = pd.concat([res, candidates], ignore_index=True)
+
+        return res
+
+
+class BPR(PersonalRetrieveRule):
+    """BPR Collaborative Filtering."""
+
+    def __init__(
+        self,
+        customer_list: List,
+        trans_df: pd.DataFrame,
+        n: int = 12,
+        name: str = "1",
+        item_id: str = "article_id",
+        num_items: int = 105542,
+    ):
+        """Initialize BPR.
+
+        Parameters
+        ----------
+        customer_list : List
+            List of target customer ids.
+        trans_df : pd.DataFrame
+            Dataframe of transaction records.
+        n : int, optional
+            Get top `n` recently bought items, by default ``12``.
+        name: str, optional
+            Name of the rule, by default ``1``.
+        item_id : str, optional
+            Name of item id, by default ``"article_id"``.
+        num_items: int, optional
+            Number of unique items in the whole dataset, by default ``105542``.
+        """
+        self.customer_list = customer_list
+        self.iid = item_id
+        self.n = n
+        self.trans_df = trans_df[["customer_id", self.iid]].drop_duplicates()
+        self.name = name
+        self.num_items = num_items
+
+    def _to_user_item_coo(self, df: pd.DataFrame):
+        """Turn a dataframe with transactions into a COO sparse items x users matrix"""
+        row = df["customer_id"].values - 1  # * input id starts from 1
+        col = df[self.iid].values - 1  # * input id starts from 1
+        data = np.ones(df.shape[0])
+        coo = coo_matrix((data, (row, col)), shape=(1371980, self.num_items))
+        return coo
+
+    def _train(self, coo_train, factors=400, iter_num=300, reg=0.01, verbose=False):
+        model = implicit.bpr.BayesianPersonalizedRanking(
+            factors=factors,
+            iterations=iter_num,
+            regularization=reg,
+            random_state=42,
+        )
+        model.fit(coo_train, show_progress=verbose)
+        return model
+
+    def _predict(self, model, uids, coo_train):
+        preds = np.zeros((uids.shape[0], self.n))
+        scores = np.zeros((uids.shape[0], self.n))
+        batch_size = 10000
+        for startidx in range(0, len(uids), batch_size):
+            batch = uids[startidx : startidx + batch_size] - 1
+            ids, batch_scores = model.recommend(
+                batch, coo_train[batch], N=self.n, filter_already_liked_items=False
+            )
+            preds[startidx : startidx + batch_size] = ids + 1
+            scores[startidx : startidx + batch_size] = batch_scores
+
+        candidates = pd.DataFrame(
+            {
+                "customer_id": np.repeat(uids, self.n),
+                "article_id": preds.reshape(-1),
+                "method": "BPR_" + self.name,
+                "score": scores.reshape(-1),
+            }
+        )
+
+        return candidates
+
+    def retrieve(self) -> pd.DataFrame:
+        coo = self._to_user_item_coo(self.trans_df)
+        coo = coo.tocsr()
+
+        model = self._train(coo)
+        candidates = self._predict(model, self.customer_list, coo)
+
+        return candidates
+
+
+class UserGroupBPR(PersonalRetrieveRule):
+    """ALS Collaborative Filtering for each group of users."""
+
+    def __init__(
+        self,
+        data: Dict,
+        customer_list: List,
+        trans_df: pd.DataFrame,
+        cat_col: str,
+        n: int = 12,
+        name: str = "1",
+        item_id: str = "article_id",
+        num_items: int = 105542,
+    ):
+        """Initialize UserGroupBPR.
+
+        Parameters
+        ----------
+        data : Dict
+            Dict of dataframes.
+        customer_list : List
+            List of target customer ids.
+        trans_df : pd.DataFrame
+            Dataframe of transaction records.
+        cat_col: str
+            Name of user group column.
+        n : int, optional
+            Get top `n` recently bought items, by default ``12``.
+        name: str, optional
+            Name of the rule, by default ``1``.
+        item_id : str, optional
+            Name of item id, by default ``"article_id"``.
+        num_items: int, optional
+            Number of unique items in the whole dataset, by default ``105542``.
+        """
+        self.data = data
+        self.customer_list = customer_list
+        self.iid = item_id
+        self.n = n
+        self.trans_df = trans_df[["customer_id", self.iid, cat_col]].drop_duplicates()
+        self.cat_col = cat_col
+        self.name = name
+        self.num_items = num_items
+
+    def _to_user_item_coo(self, df: pd.DataFrame):
+        """Turn a dataframe with transactions into a COO sparse items x users matrix"""
+        row = df["customer_id"].values - 1  # * input id starts from 1
+        col = df[self.iid].values - 1  # * input id starts from 1
+        data = np.ones(df.shape[0])
+        coo = coo_matrix((data, (row, col)), shape=(1371980, self.num_items))
+        return coo
+
+    def _train(self, coo_train, factors=300, iter_num=300, reg=0.01, verbose=False):
+        model = implicit.bpr.BayesianPersonalizedRanking(
+            factors=factors,
+            iterations=iter_num,
+            regularization=reg,
+            random_state=42,
+        )
+        model.fit(coo_train, show_progress=verbose)
+        return model
+
+    def _predict(self, model, uids, coo_train):
+        preds = np.zeros((uids.shape[0], self.n))
+        scores = np.zeros((uids.shape[0], self.n))
+        batch_size = 10000
+        for startidx in range(0, len(uids), batch_size):
+            batch = uids[startidx : startidx + batch_size] - 1
+            ids, batch_scores = model.recommend(
+                batch, coo_train[batch], N=self.n, filter_already_liked_items=False
+            )
+            preds[startidx : startidx + batch_size] = ids + 1
+            scores[startidx : startidx + batch_size] = batch_scores
+
+        candidates = pd.DataFrame(
+            {
+                "customer_id": np.repeat(uids, self.n),
+                "article_id": preds.reshape(-1),
+                "method": "UGBPR_" + self.name,
+                "score": scores.reshape(-1),
+            }
+        )
+
+        return candidates
+
+    def retrieve(self) -> pd.DataFrame:
+        res = None
+        user_info = pd.DataFrame({"customer_id": self.customer_list})
+        user_info = user_info.merge(
+            self.data["user"][["customer_id", self.cat_col]],
+            on="customer_id",
+            how="left",
+        )
+        for value in self.trans_df[self.cat_col].unique():
+            tmp_df = self.trans_df[self.trans_df[self.cat_col] == value]
+            coo = self._to_user_item_coo(tmp_df)
+            coo = coo.tocsr()
+            model = self._train(coo)
+            uids = user_info.loc[user_info[self.cat_col] == value, "customer_id"].values
+            candidates = self._predict(model, uids, coo)
+            res = pd.concat([res, candidates], ignore_index=True)
+
+        return res
 
 
 # * ====================== User Group Retrieve Rules ====================== *
