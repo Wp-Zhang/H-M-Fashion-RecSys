@@ -226,6 +226,7 @@ def merge_week_data(
         start_date, end_date = calc_valid_date(week_num)
         mask = (start_date <= trans["t_dat"]) & (trans["t_dat"] < end_date)
         label = trans.loc[mask, ["customer_id", "article_id"]]
+        label = label.drop_duplicates(["customer_id", "article_id"])
         label["label"] = 1
 
         label_customers = label["customer_id"].unique()
