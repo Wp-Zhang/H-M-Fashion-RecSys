@@ -310,10 +310,13 @@ class ALS(PersonalRetrieveRule):
         self,
         customer_list: List,
         trans_df: pd.DataFrame,
+        days: int = 5,
         n: int = 12,
         name: str = "1",
         item_id: str = "article_id",
         num_items: int = 105542,
+        factors: int = 200,
+        iter_num: int = 15,
     ):
         """Initialize ALS.
 
@@ -338,6 +341,13 @@ class ALS(PersonalRetrieveRule):
         self.trans_df = trans_df[["customer_id", self.iid]].drop_duplicates()
         self.name = name
         self.num_items = num_items
+        self.factors = factors
+        self.iter_num = iter_num
+
+        df = trans_df[["article_id", "t_dat"]]
+        df["t_dat"] = pd.to_datetime(df["t_dat"])
+        df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
+        self.target_items = df["article_id"].value_counts().index[:1000]
 
     def _to_user_item_coo(self, df: pd.DataFrame):
         """Turn a dataframe with transactions into a COO sparse items x users matrix"""
@@ -347,11 +357,11 @@ class ALS(PersonalRetrieveRule):
         coo = coo_matrix((data, (row, col)), shape=(1371980, self.num_items))
         return coo
 
-    def _train(self, coo_train, factors=500, iter_num=3, reg=0.01, verbose=False):
+    def _train(self, coo_train, reg=0.01, verbose=False):
         model = implicit.als.AlternatingLeastSquares(
-            factors=factors,
-            iterations=iter_num,
-            regularization=reg,
+            factors=self.factors,
+            iterations=self.iter_num,
+            # regularization=reg,
             random_state=42,
         )
         model.fit(coo_train, show_progress=verbose)
@@ -364,7 +374,11 @@ class ALS(PersonalRetrieveRule):
         for startidx in range(0, len(uids), batch_size):
             batch = uids[startidx : startidx + batch_size] - 1
             ids, batch_scores = model.recommend(
-                batch, coo_train[batch], N=self.n, filter_already_liked_items=False
+                batch,
+                coo_train[batch],
+                N=self.n,
+                items=self.target_items - 1,
+                filter_already_liked_items=False,
             )
             preds[startidx : startidx + batch_size] = ids + 1
             scores[startidx : startidx + batch_size] = batch_scores
@@ -398,10 +412,13 @@ class UserGroupALS(PersonalRetrieveRule):
         customer_list: List,
         trans_df: pd.DataFrame,
         cat_col: str,
+        days: int = 5,
         n: int = 12,
         name: str = "1",
         item_id: str = "article_id",
         num_items: int = 105542,
+        factors: int = 200,
+        iter_num: int = 15,
     ):
         """Initialize UserGroupALS.
 
@@ -441,6 +458,13 @@ class UserGroupALS(PersonalRetrieveRule):
         self.cat_col = cat_col
         self.name = name
         self.num_items = num_items
+        self.factors = factors
+        self.iter_num = iter_num
+
+        df = trans_df[["article_id", "t_dat"]]
+        df["t_dat"] = pd.to_datetime(df["t_dat"])
+        df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
+        self.target_items = df["article_id"].value_counts().index[:1000]
 
     def _to_user_item_coo(self, df: pd.DataFrame):
         """Turn a dataframe with transactions into a COO sparse items x users matrix"""
@@ -454,7 +478,7 @@ class UserGroupALS(PersonalRetrieveRule):
         model = implicit.als.AlternatingLeastSquares(
             factors=factors,
             iterations=iter_num,
-            regularization=reg,
+            # regularization=reg,
             random_state=42,
         )
         model.fit(coo_train, show_progress=verbose)
@@ -467,7 +491,11 @@ class UserGroupALS(PersonalRetrieveRule):
         for startidx in range(0, len(uids), batch_size):
             batch = uids[startidx : startidx + batch_size] - 1
             ids, batch_scores = model.recommend(
-                batch, coo_train[batch], N=self.n, filter_already_liked_items=False
+                batch,
+                coo_train[batch],
+                N=self.n,
+                items=self.target_items - 1,
+                filter_already_liked_items=False,
             )
             preds[startidx : startidx + batch_size] = ids + 1
             scores[startidx : startidx + batch_size] = batch_scores
@@ -510,10 +538,13 @@ class BPR(PersonalRetrieveRule):
         self,
         customer_list: List,
         trans_df: pd.DataFrame,
+        days: int = 5,
         n: int = 12,
         name: str = "1",
         item_id: str = "article_id",
         num_items: int = 105542,
+        factors: int = 300,
+        iter_num: int = 15,
     ):
         """Initialize BPR.
 
@@ -538,6 +569,13 @@ class BPR(PersonalRetrieveRule):
         self.trans_df = trans_df[["customer_id", self.iid]].drop_duplicates()
         self.name = name
         self.num_items = num_items
+        self.factors = factors
+        self.iter_num = iter_num
+
+        df = trans_df[["article_id", "t_dat"]]
+        df["t_dat"] = pd.to_datetime(df["t_dat"])
+        df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
+        self.target_items = df["article_id"].value_counts().index[:1000]
 
     def _to_user_item_coo(self, df: pd.DataFrame):
         """Turn a dataframe with transactions into a COO sparse items x users matrix"""
@@ -547,11 +585,12 @@ class BPR(PersonalRetrieveRule):
         coo = coo_matrix((data, (row, col)), shape=(1371980, self.num_items))
         return coo
 
-    def _train(self, coo_train, factors=400, iter_num=300, reg=0.01, verbose=False):
+    def _train(self, coo_train, reg=0.01, verbose=False):
         model = implicit.bpr.BayesianPersonalizedRanking(
-            factors=factors,
-            iterations=iter_num,
-            regularization=reg,
+            factors=self.factors,
+            iterations=self.iter_num,
+            learning_rate=0.05,
+            # regularization=reg,
             random_state=42,
         )
         model.fit(coo_train, show_progress=verbose)
@@ -564,7 +603,11 @@ class BPR(PersonalRetrieveRule):
         for startidx in range(0, len(uids), batch_size):
             batch = uids[startidx : startidx + batch_size] - 1
             ids, batch_scores = model.recommend(
-                batch, coo_train[batch], N=self.n, filter_already_liked_items=False
+                batch,
+                coo_train[batch],
+                N=self.n,
+                items=self.target_items - 1,
+                filter_already_liked_items=False,
             )
             preds[startidx : startidx + batch_size] = ids + 1
             scores[startidx : startidx + batch_size] = batch_scores
@@ -599,10 +642,13 @@ class UserGroupBPR(PersonalRetrieveRule):
         customer_list: List,
         trans_df: pd.DataFrame,
         cat_col: str,
+        days: int = 5,
         n: int = 12,
         name: str = "1",
         item_id: str = "article_id",
         num_items: int = 105542,
+        factors: int = 300,
+        iter_num: int = 15,
     ):
         """Initialize UserGroupBPR.
 
@@ -633,6 +679,13 @@ class UserGroupBPR(PersonalRetrieveRule):
         self.cat_col = cat_col
         self.name = name
         self.num_items = num_items
+        self.factors = factors
+        self.iter_num = iter_num
+
+        df = trans_df[["article_id", "t_dat"]]
+        df["t_dat"] = pd.to_datetime(df["t_dat"])
+        df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
+        self.target_items = df["article_id"].value_counts().index[:1000]
 
     def _to_user_item_coo(self, df: pd.DataFrame):
         """Turn a dataframe with transactions into a COO sparse items x users matrix"""
@@ -644,9 +697,10 @@ class UserGroupBPR(PersonalRetrieveRule):
 
     def _train(self, coo_train, factors=300, iter_num=300, reg=0.01, verbose=False):
         model = implicit.bpr.BayesianPersonalizedRanking(
-            factors=factors,
-            iterations=iter_num,
-            regularization=reg,
+            factors=self.factors,
+            iterations=self.iter_num,
+            learning_rate=0.05,
+            # regularization=reg,
             random_state=42,
         )
         model.fit(coo_train, show_progress=verbose)
@@ -659,7 +713,11 @@ class UserGroupBPR(PersonalRetrieveRule):
         for startidx in range(0, len(uids), batch_size):
             batch = uids[startidx : startidx + batch_size] - 1
             ids, batch_scores = model.recommend(
-                batch, coo_train[batch], N=self.n, filter_already_liked_items=False
+                batch,
+                coo_train[batch],
+                N=self.n,
+                items=self.target_items - 1,
+                filter_already_liked_items=False,
             )
             preds[startidx : startidx + batch_size] = ids + 1
             scores[startidx : startidx + batch_size] = batch_scores
@@ -711,6 +769,7 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         name: str = "1",
         unique: bool = True,
         item_id: str = "article_id",
+        scale: bool = False,
     ):
         """Initialize TimeHistory.
 
@@ -741,6 +800,7 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
         self.unique = unique
         self.n = n
         self.name = name
+        self.scale = scale
 
     def retrieve(self) -> List[int]:
         """Get popular items in the specified time window
@@ -761,7 +821,10 @@ class UserGroupTimeHistory(UserGroupRetrieveRule):
             ascending=True, method="first"
         )
 
-        df["score"] = df["count"]
+        if self.scale:
+            df["score"] = df["count"] / df["count"].max()
+        else:
+            df["score"] = df["count"]
         df["method"] = "UGTimeHistory_" + self.name
         df = df[df["rank"] <= self.n][[*self.cat_cols, self.iid, "score", "method"]]
 
@@ -1114,6 +1177,57 @@ class OutOfStock(FilterRule):
         sale = sale.fillna(0)
         mask = ((sale["2020_9"] - sale["2020_8"]) / sale["2020_8"]) < -0.8
         mask2 = sale["2020_9"] == 0
+
+        return list(sale[mask | mask2].index)
+
+    def retrieve(self) -> List:
+        off_stock = self._off_stock_items()
+
+        return off_stock
+
+
+class OutOfStock2(FilterRule):
+    """Filter items that are out of stock."""
+
+    def __init__(
+        self, trans_df: pd.DataFrame, item_id: str = "article_id", days: int = 14
+    ):
+        """Initialize OutOfStock.
+
+        Parameters
+        ----------
+        trans_df : pd.DataFrame
+            Dataframe of transaction records.
+        item_id : str, optional
+           Name of item id, by default ``"article_id"``.
+        """
+        self.iid = item_id
+        self.days = days
+        start_date = pd.to_datetime(trans_df["t_dat"].max())
+        start_date -= pd.Timedelta(days=days * 2)
+        self.start_date = start_date
+        mask = trans_df["t_dat"] >= start_date.strftime("%Y-%m-%d")
+        self.trans_df = trans_df.loc[mask, ["customer_id", self.iid, "t_dat"]]
+
+    def _off_stock_items(self) -> List[int]:
+        """Get items that are no longer for sale
+
+        Returns:
+            List: list of off stock items
+        """
+        sale = self.trans_df
+        sale["t_dat"] = pd.to_datetime(sale["t_dat"])
+        sale["GROUP"] = (sale["t_dat"] - self.start_date).dt.days // self.days
+        sale = (
+            sale.groupby([self.iid, "GROUP"])["customer_id"]
+            .count()
+            .reset_index(name="count")
+        )
+
+        sale = pd.pivot_table(sale, values="count", index=self.iid, columns="GROUP")
+        sale = sale.fillna(0)
+        mask = ((sale[1] - sale[0]) / sale[0]) < -0.8
+        mask2 = sale[1] == 0
 
         return list(sale[mask | mask2].index)
 

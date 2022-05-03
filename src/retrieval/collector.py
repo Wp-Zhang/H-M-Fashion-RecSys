@@ -18,6 +18,7 @@ class RuleCollector:
         filters: List = [],
         min_pos_rate: float = 0.01,
         item_id: str = "article_id",
+        norm: bool = True,
         compress=True,
     ) -> pd.DataFrame:
         """Collect retreival results
@@ -64,8 +65,11 @@ class RuleCollector:
         pred_df = None
         for rule in tqdm(rules, "Retrieve items by rules"):
             items = rule.retrieve()
-            scaler = QuantileTransformer(output_distribution="normal")
-            items["score"] = scaler.fit_transform(items["score"].values.reshape(-1, 1))
+            if norm:
+                scaler = QuantileTransformer(output_distribution="normal")
+                items["score"] = scaler.fit_transform(
+                    items["score"].values.reshape(-1, 1)
+                )
             items = items.loc[~items[item_id].isin(rm_items)]
 
             if label.shape[0] != 0:
