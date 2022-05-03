@@ -185,3 +185,24 @@ def purchased_before(trans: pd.DataFrame, groupby_cols: List) -> np.ndarray:
     tmp["_BOUGHT"][tmp["_BOUGHT"] > 1] = 1
 
     return tmp["_BOUGHT"].values
+
+
+def popularity(
+    trans: pd.DataFrame, item_id: str = "article_id", week_num: int = 6
+) -> np.ndarray:
+    df = trans[[item_id, "t_dat", "week"]]
+    df["t_dat"] = pd.to_datetime(df["t_dat"])
+
+    tmp_l = []
+    name = "Popularity_" + item_id
+    for week in range(week_num):
+        tmp_df = df[df["week"] >= week]
+        last_day = tmp_df["t_dat"].max()
+        tmp_df[name] = 1 / ((last_day - tmp_df["t_dat"]).dt.days + 1)
+        tmp_df = tmp_df.groupby([item_id])[name].sum().reset_index()
+        tmp_df["week"] = week
+        tmp_l.append(tmp_df)
+
+    info = pd.concat(tmp_l)[[item_id, name, "week"]]
+    df = df.merge(info, on=[item_id, "week"], how="left")
+    return df[name].values
