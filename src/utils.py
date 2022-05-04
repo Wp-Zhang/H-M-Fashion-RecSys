@@ -242,7 +242,14 @@ def merge_week_data(
     # Merge with features
     candidates = candidates.merge(trans_info, on="article_id", how="left")
 
-    user_feats = ["FN", "Active", "club_member_status", "fashion_news_frequency", "age"]
+    user_feats = [
+        "FN",
+        "Active",
+        "club_member_status",
+        "fashion_news_frequency",
+        "age",
+        "user_gender",
+    ]
     candidates = candidates.merge(
         user[["customer_id", *user_feats]], on="customer_id", how="left"
     )
@@ -255,6 +262,8 @@ def merge_week_data(
         "colour_group_code",
         "perceived_colour_value_id",
         "perceived_colour_master_id",
+        "article_gender",
+        "season_type",
     ]
     candidates = candidates.merge(
         item[["article_id", *item_feats]], on="article_id", how="left"
