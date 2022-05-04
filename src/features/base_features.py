@@ -37,7 +37,9 @@ def cum_sale(trans: pd.DataFrame, groupby_cols: List, unique=False) -> np.ndarra
     return tmp_inter["_SALE"].values
 
 
-def week_sale(trans: pd.DataFrame, groupby_cols: List, unique=False) -> np.ndarray:
+def week_sale(
+    trans: pd.DataFrame, groupby_cols: List, unique=False, step: int = 0
+) -> np.ndarray:
     """Calculate week sales of each item unit.
 
     Parameters
@@ -48,6 +50,8 @@ def week_sale(trans: pd.DataFrame, groupby_cols: List, unique=False) -> np.ndarr
         Item unit.
     unique : bool, optional
         Whether to drop duplicate customer-item pairs, by default ``False``.
+    step: int, optional
+        Step of week, by default ``0``. 0 means current week sale, 1 means last week sale, etc.
 
     Returns
     -------
@@ -59,6 +63,7 @@ def week_sale(trans: pd.DataFrame, groupby_cols: List, unique=False) -> np.ndarr
         tmp_inter = tmp_inter.drop_duplicates(["customer_id", *groupby_cols])
 
     df = tmp_inter.groupby(["week", *groupby_cols]).size().reset_index(name="_SALE")
+    df["week"] -= step
     # df["_SALE"] = df.groupby(groupby_cols)["_SALE"].cumsum()
     # df["_SALE"] = df.groupby(groupby_cols)["_SALE"].shift(1)
     # df["_SALE"] = df["_SALE"].fillna(0)
@@ -101,7 +106,7 @@ def sale_trend(
 
     tmp_l = []
     name = "SaleTrend_" + "|".join(groupby_cols) + "_" + item_id
-    for week in range(week_num):
+    for week in range(1, week_num + 1):
         tmp_df = df[df["week"] >= week]
         tmp_df["dat_gap"] = (tmp_df.t_dat.max() - tmp_df.t_dat).dt.days
 
@@ -126,13 +131,14 @@ def sale_trend(
 
     info = pd.concat(tmp_l)[[*groupby_cols, item_id, name, "week"]]
     info = info.drop_duplicates(groupby_cols + [item_id, "week"])
-
     df = df.merge(info, on=[*groupby_cols, item_id, "week"], how="left")
 
     return df[name].values
 
 
-def repurchase_ratio(trans: pd.DataFrame, groupby_cols: List) -> np.ndarray:
+def repurchase_ratio(
+    trans: pd.DataFrame, groupby_cols: List, week_num: int = 6
+) -> np.ndarray:
     """Calculate repurchase ratio of item units.
 
     Parameters
@@ -147,26 +153,35 @@ def repurchase_ratio(trans: pd.DataFrame, groupby_cols: List) -> np.ndarray:
     np.ndarray
         Array of repurchase ratios.
     """
+    tmp_l = []
+    for week in range(1, week_num + 1):
+        tmp_df = trans[trans["week"] >= week]
+        # * Article re-purchase ratio
+        item_user_sale = (
+            tmp_df.groupby(["customer_id", *groupby_cols])
+            .size()
+            .reset_index(name="_SALE")
+        )
+        item_sale = (
+            item_user_sale.groupby(groupby_cols).size().reset_index(name="_I_SALE")
+        )
+        item_user_sale = (
+            item_user_sale[item_user_sale["_SALE"] > 1]  # * purchase more than once
+            .groupby(groupby_cols)
+            .size()
+            .reset_index(name="_MULTI_SALE")
+        )
+        item_sale = item_sale.merge(item_user_sale, on=groupby_cols, how="left")
+        item_sale["_RATIO"] = item_sale["_MULTI_SALE"] / item_sale["_I_SALE"]
+        item_sale = item_sale[[*groupby_cols, "_RATIO"]]
+        item_sale["week"] = week
+        tmp_l.append(item_sale)
 
-    # * Article re-purchase ratio
-    item_user_sale = (
-        trans.groupby(["customer_id", *groupby_cols]).size().reset_index(name="_SALE")
-    )
-    item_sale = item_user_sale.groupby(groupby_cols).size().reset_index(name="_I_SALE")
-    item_user_sale = (
-        item_user_sale[item_user_sale["_SALE"] > 1]  # * purchase more than once
-        .groupby(groupby_cols)
-        .size()
-        .reset_index(name="_MULTI_SALE")
-    )
-    item_sale = item_sale.merge(item_user_sale, on=groupby_cols, how="left")
-    item_sale["_RATIO"] = item_sale["_MULTI_SALE"] / item_sale["_I_SALE"]
-    item_sale = item_sale[[*groupby_cols, "_RATIO"]]
+    df = trans[["week", *groupby_cols]]
+    item_sale = pd.concat(tmp_l, ignore_index=True)
+    df = df.merge(item_sale, on=["week", *groupby_cols], how="left")
 
-    tmp_trans = trans[groupby_cols]
-    tmp_trans = tmp_trans.merge(item_sale, on=groupby_cols, how="left")
-
-    return tmp_trans["_RATIO"].values
+    return df["_RATIO"].values
 
 
 def purchased_before(trans: pd.DataFrame, groupby_cols: List) -> np.ndarray:
@@ -195,7 +210,7 @@ def popularity(
 
     tmp_l = []
     name = "Popularity_" + item_id
-    for week in range(week_num):
+    for week in range(1, week_num + 1):
         tmp_df = df[df["week"] >= week]
         last_day = tmp_df["t_dat"].max()
         tmp_df[name] = 1 / ((last_day - tmp_df["t_dat"]).dt.days + 1)

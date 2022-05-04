@@ -208,10 +208,11 @@ def merge_week_data(
     item = data["item"]
     user = data["user"]
 
-    trans = trans.sort_values(by=["t_dat", "customer_id"]).reset_index(drop=True)
     trans_info = (
-        trans[trans["week"] > week_num]
-        .groupby(["article_id"], as_index=False)
+        trans[trans["week"] == week_num + 1]
+        .sort_values(by=["t_dat", "customer_id"])
+        .reset_index(drop=True)
+        .groupby(["week", "article_id"], as_index=False)
         .last()
         .drop(columns=["customer_id"])
     )
