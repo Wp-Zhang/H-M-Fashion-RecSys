@@ -100,6 +100,160 @@ class DataHelper:
 
         return data
 
+    def _base_features(self, data: dict) -> dict:
+        """Extract base features from data dictionary.
+
+        Parameters
+        ----------
+        data : dict
+            Data dictionary, keys: 'item', 'user', 'inter'.
+
+        Returns
+        -------
+        dict
+            Data dictionary, keys: 'item', 'user', 'inter'.
+        """
+        item = data["item"]
+        user = data["user"]
+        trans = data["inter"]
+
+        def set_gender_flg(x):
+            female_pro_types = [
+                "Bra",
+                "Underwear Tights",
+                "Leggings/Tights",
+                "Hair clip",
+                "Hair string",
+                "Hair/alice band",
+                "Bikini top",
+                "Skirt",
+                "Dress",
+                "Earring",
+                "Alice band",
+                "Straw hat",
+                "Necklace",
+                "Ballerinas",
+                "Blouse",
+                "Beanie",
+                "Giftbox",
+                "Pumps",
+                "Bootie",
+                "Heeled sandals",
+                "Nipple covers",
+                "Hair ties",
+                "Underwear corset",
+                "Bra extender",
+                "Underdress",
+                "Underwear set",
+                "Sarong",
+                "Leg warmers",
+                "Hairband",
+                "Tote bag",
+                "Earrings",
+                "Flat shoes",
+                "Heels",
+                "Cap",
+                "Shoulder bag",
+                "Headband",
+                "Baby Bib",
+                "Cross-body bag",
+                "Bumbag",
+            ]
+            x["article_gender"] = 0  # * 0 for not divided, 1 for male, 2 for female
+            if x["index_group_name"] == "Ladieswear":
+                x["article_gender"] = 2
+            elif x["index_group_name"] == "Menswear":
+                x["article_gender"] = 1
+            else:
+                if (
+                    "boy" in x["department_name"].lower()
+                    or "men" in x["department_name"].lower()
+                ):
+                    x["article_gender"] = 1
+                if (
+                    "girl" in x["department_name"].lower()
+                    or "ladies" in x["department_name"].lower()
+                    or x["product_type_name"] in female_pro_types
+                ):
+                    x["article_gender"] = 2
+            return x
+
+        # * Recognize article gender
+        item = item.apply(set_gender_flg, axis=1)
+
+        # * Seasonal Articles
+        summer = [
+            "Sunglasses",
+            "Hat/brim",
+            "Sandals",
+            "Flat shoe",
+            "Heeled sandals",
+            "Polo shirt",
+            "Dress",
+            "T-shirt",
+            "Skirt",
+            "Vest top",
+            "Swimwear top",
+            "Swimsuit",
+            "Swimwear bottom",
+            "Bikini top",
+            "Shorts",
+        ]
+        winter = [
+            "Beanie",
+            "Felt hat",
+            "Outdoor overall",
+            "Long John",
+            "Pyjama bottom",
+            "Hat/beanie",
+            "Leggings/Tights",
+            "Hoodie",
+            "Underwear Tights",
+            "Pyjama set",
+            "Boots",
+            "Cardigan",
+            "Sweater",
+            "Jacket",
+            "Scarf",
+            "Coat",
+            "Gloves",
+            "Outdoor Waistcoat",
+        ]
+        item["season_type"] = 0
+        item.loc[item["product_type_name"].isin(summer), "season_type"] = 1
+        item.loc[item["product_type_name"].isin(winter), "season_type"] = 2
+
+        # * Recognize user gender
+        trans = pd.merge(
+            trans,
+            item[["article_id", "article_gender", "product_type_name"]],
+            on="article_id",
+            how="left",
+        )
+        ttl_cnt = trans.groupby(["customer_id"]).size().reset_index(name="ttl_cnt")
+        gender_sale = (
+            trans.groupby(["customer_id", "article_gender"])
+            .size()
+            .reset_index(name="cnt")
+        )
+        gender_sale = gender_sale.merge(ttl_cnt, on=["customer_id"], how="left")
+        gender_sale["ratio"] = gender_sale["cnt"] / gender_sale["ttl_cnt"]
+        gender_sale = pd.pivot_table(
+            gender_sale, values="ratio", index="customer_id", columns=["article_gender"]
+        )
+        gender_sale = gender_sale.reset_index()
+        gender_sale["user_gender"] = 0
+        gender_sale.loc[gender_sale[1] >= 0.8, "user_gender"] = 1  # * male
+        gender_sale.loc[gender_sale[2] >= 0.8, "user_gender"] = 2  # * female
+        user = user.merge(
+            gender_sale[["customer_id", "user_gender"]], on="customer_id", how="left"
+        )
+        user["user_gender"] = user["user_gender"].fillna(0)
+
+        data["item"] = item
+        data["user"] = user
+        return data
+
     def _transform_feats(self, data: dict) -> dict:
         """Transform features (label encode and change dtypes)
 
@@ -125,7 +279,7 @@ class DataHelper:
         inter["sales_channel_id"] = inter["sales_channel_id"].astype("int8")
 
         # Customers
-        user_sparse_feats = [x for x in user.columns if x not in ["age"]]
+        user_sparse_feats = [x for x in user.columns if x not in ["age", "user_gender"]]
         for feat in tqdm(
             [x for x in user_sparse_feats if x != "customer_id"],
             "Encode User Sparse Feats",
@@ -150,9 +304,15 @@ class DataHelper:
             "index_group_no",
             "section_no",
             "garment_group_no",
+            "article_gender",
+            "season_type",
         ]
         for feat in tqdm(
-            [x for x in item_sparse_feats if x != "article_id"],
+            [
+                x
+                for x in item_sparse_feats
+                if x not in ["article_id", "article_gender", "season_type"]
+            ],
             "Encode Item Sparse Feats",
         ):
             lbe = LabelEncoder()
@@ -230,6 +390,7 @@ class DataHelper:
         """
         data = self._load_raw_data()
         data = self._encode_id(data, "index_id_map")
+        data = self._base_features(data)
         data = self._transform_feats(data)
         if save:
             self.save_data(data, name)
