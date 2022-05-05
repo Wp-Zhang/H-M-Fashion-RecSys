@@ -3,7 +3,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import List, Dict
 from tqdm import tqdm
-
+import math
 import implicit
 from scipy.sparse import coo_matrix
 
@@ -317,6 +317,7 @@ class ALS(PersonalRetrieveRule):
         num_items: int = 105542,
         factors: int = 200,
         iter_num: int = 15,
+        item_pool: List = None,
     ):
         """Initialize ALS.
 
@@ -344,10 +345,13 @@ class ALS(PersonalRetrieveRule):
         self.factors = factors
         self.iter_num = iter_num
 
-        df = trans_df[["article_id", "t_dat"]]
-        df["t_dat"] = pd.to_datetime(df["t_dat"])
-        df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
-        self.target_items = df["article_id"].value_counts().index[:1000]
+        if item_pool is not None:
+            self.target_items = item_pool
+        else:
+            df = trans_df[["article_id", "t_dat"]]
+            df["t_dat"] = pd.to_datetime(df["t_dat"])
+            df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
+            self.target_items = df["article_id"].value_counts().index[:1000]
 
     def _to_user_item_coo(self, df: pd.DataFrame):
         """Turn a dataframe with transactions into a COO sparse items x users matrix"""
@@ -446,25 +450,28 @@ class UserGroupALS(PersonalRetrieveRule):
         self.iid = item_id
         self.n = n
         if cat_col not in trans_df.columns:
-            self.trans_df = trans_df[["customer_id", self.iid]]
+            self.trans_df = trans_df[["customer_id", self.iid, "t_dat"]]
             user_info = data["user"][["customer_id", cat_col]]
             self.trans_df = self.trans_df.merge(user_info, on="customer_id", how="left")
         else:
-            self.trans_df = trans_df[["customer_id", self.iid, cat_col]]
+            self.trans_df = trans_df[["customer_id", self.iid, cat_col, "t_dat"]]
 
-        self.trans_df = self.trans_df[
+        self.trans_df = self.trans_df.drop_duplicates(
             ["customer_id", self.iid, cat_col]
-        ].drop_duplicates()
+        )
         self.cat_col = cat_col
         self.name = name
         self.num_items = num_items
         self.factors = factors
         self.iter_num = iter_num
 
-        df = trans_df[["article_id", "t_dat"]]
-        df["t_dat"] = pd.to_datetime(df["t_dat"])
-        df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
-        self.target_items = df["article_id"].value_counts().index[:1000]
+        self.target_items = {}
+        for value in self.data["user"][cat_col].unique():
+            df = self.trans_df[["article_id", "t_dat", cat_col]]
+            df = df[df[cat_col] == value]
+            df["t_dat"] = pd.to_datetime(df["t_dat"])
+            df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
+            self.target_items[value] = df["article_id"].value_counts().index[:1000]
 
     def _to_user_item_coo(self, df: pd.DataFrame):
         """Turn a dataframe with transactions into a COO sparse items x users matrix"""
@@ -484,7 +491,7 @@ class UserGroupALS(PersonalRetrieveRule):
         model.fit(coo_train, show_progress=verbose)
         return model
 
-    def _predict(self, model, uids, coo_train):
+    def _predict(self, model, uids, coo_train, value):
         preds = np.zeros((uids.shape[0], self.n))
         scores = np.zeros((uids.shape[0], self.n))
         batch_size = 10000
@@ -494,7 +501,7 @@ class UserGroupALS(PersonalRetrieveRule):
                 batch,
                 coo_train[batch],
                 N=self.n,
-                items=self.target_items - 1,
+                items=self.target_items[value] - 1,
                 filter_already_liked_items=False,
             )
             preds[startidx : startidx + batch_size] = ids + 1
@@ -525,7 +532,7 @@ class UserGroupALS(PersonalRetrieveRule):
             coo = coo.tocsr()
             model = self._train(coo)
             uids = user_info.loc[user_info[self.cat_col] == value, "customer_id"].values
-            candidates = self._predict(model, uids, coo)
+            candidates = self._predict(model, uids, coo, value)
             res = pd.concat([res, candidates], ignore_index=True)
 
         return res
@@ -545,6 +552,7 @@ class BPR(PersonalRetrieveRule):
         num_items: int = 105542,
         factors: int = 300,
         iter_num: int = 15,
+        item_pool: List = None,
     ):
         """Initialize BPR.
 
@@ -572,10 +580,13 @@ class BPR(PersonalRetrieveRule):
         self.factors = factors
         self.iter_num = iter_num
 
-        df = trans_df[["article_id", "t_dat"]]
-        df["t_dat"] = pd.to_datetime(df["t_dat"])
-        df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
-        self.target_items = df["article_id"].value_counts().index[:1000]
+        if item_pool is not None:
+            self.target_items = item_pool
+        else:
+            df = trans_df[["article_id", "t_dat"]]
+            df["t_dat"] = pd.to_datetime(df["t_dat"])
+            df = df[df["t_dat"] > df["t_dat"].max() - pd.Timedelta(days=days)]
+            self.target_items = df["article_id"].value_counts().index[:1000]
 
     def _to_user_item_coo(self, df: pd.DataFrame):
         """Turn a dataframe with transactions into a COO sparse items x users matrix"""
@@ -749,6 +760,113 @@ class UserGroupBPR(PersonalRetrieveRule):
             uids = user_info.loc[user_info[self.cat_col] == value, "customer_id"].values
             candidates = self._predict(model, uids, coo)
             res = pd.concat([res, candidates], ignore_index=True)
+
+        return res
+
+
+class ItemCF(PersonalRetrieveRule):
+    def __init__(self, history_df, target_df, top_k=20, name="1"):
+        self.history_df = history_df.groupby("customer_id")["article_id"].apply(list)
+        self.target_df = target_df.groupby("customer_id")["article_id"].apply(list)
+        self.top_k = top_k
+        self.name = name
+
+    def _item_cf(self, top_k=20):
+        sim_item = {}
+        item_cnt = {}
+
+        for user in self.history_df.keys():
+            items = self.history_df[user]
+            for i, item in enumerate(items[:-1]):
+                sim_item.setdefault(item, {})
+                item_cnt[item] = item_cnt.get(item, 0) + 1
+                for j, relate_item in enumerate(items):
+                    if i == j:
+                        continue
+                    loc_alpha = 1.0 if j > i else 0.9  # * direction factor
+                    loc_weight = loc_alpha * 0.7 ** (
+                        abs(j - i) - 1
+                    )  # * distance factor
+                    sim_item[item].setdefault(relate_item, 0)
+                    sim_item[item][relate_item] += loc_weight / math.log(
+                        1 + len(items)
+                    )  # * popularity factor
+
+        sim_item_corr = sim_item.copy()
+        for i, related_items in sim_item.items():
+            # for j, cij in related_items.items():
+            # sim_item_corr[i][j] = cij / math.sqrt(item_cnt.get(i,1) * item_cnt.get(j,1))
+            sim_item_corr[i] = sorted(
+                related_items.items(), key=lambda x: x[1], reverse=True
+            )
+
+        pred_next = {}
+        pred_score = {}
+        for item in sim_item_corr:
+            if len(sim_item_corr[item]) >= 5:
+                l = pred_next.get(item, [])
+                l2 = pred_score.get(item, [])
+                relate_items = sim_item_corr[item][:top_k]
+                pred_next[item] = l + [x[0] for x in relate_items]
+                pred_score[item] = l2 + [x[1] for x in relate_items]
+
+        return pred_next, pred_score
+
+    def _predict(self, item_dict, score_dict):
+        item_cf_res = {}
+        item_cf_score = {}
+        for user in self.target_df.keys():
+            l = item_cf_res.get(user, [])
+            l2 = item_cf_score.get(user, [])
+            for item in self.target_df[user]:
+                if item in item_dict:
+                    l += item_dict[item]
+                    l2 += score_dict[item]
+            item_cf_res[user] = l
+            item_cf_score[user] = l2
+
+        length = sum([len(item_cf_res[x]) for x in item_cf_res])
+        candidates = np.zeros((length, 3))
+        p = 0
+        for uid in item_cf_res:
+            tmp_items = item_cf_res[uid]
+            tmp_scores = item_cf_score[uid]
+            if len(tmp_items) == 0:
+                continue
+            candidates[p : p + len(tmp_items), 0] = uid
+            candidates[p : p + len(tmp_items), 1] = tmp_items
+            candidates[p : p + len(tmp_items), 2] = tmp_scores
+            p += len(tmp_items)
+        candidates = pd.DataFrame(
+            candidates[:p], columns=["customer_id", "article_id", "score"]
+        )
+        candidates["method"] = "ItemCF_" + self.name
+        return candidates
+
+    def retrieve(self, top_k=20):
+        item_dict, score_dict = self._item_cf(top_k)
+        candidates = self._predict(item_dict, score_dict)
+        return candidates
+
+
+class UserGroupItemCF(PersonalRetrieveRule):
+    def __init__(self, history_df, target_df, cat_col, top_k=20, name="1"):
+        self.history_dict = {}
+        self.target_dict = {}
+        for value in history_df[cat_col].unique():
+            self.history_dict[value] = history_df[history_df[cat_col] == value]
+        for value in target_df[cat_col].unique():
+            self.target_dict[value] = target_df[target_df[cat_col] == value]
+        self.top_k = top_k
+        self.name = name
+
+    def retrieve(self):
+        res_l = []
+        for group in self.history_dict:
+            cf = ItemCF(self.history_dict[group], self.target_dict[group], self.top_k)
+            res_l.append(cf.retrieve())
+        res = pd.concat(res_l, ignore_index=True)
+        res["method"] = "UGItemCF_" + self.name
 
         return res
 

@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict
 from tqdm import tqdm
-from sklearn.preprocessing import QuantileTransformer
+from sklearn.preprocessing import QuantileTransformer, MinMaxScaler
 from ..utils import calc_valid_date
 
 
@@ -66,7 +66,8 @@ class RuleCollector:
         for rule in tqdm(rules, "Retrieve items by rules"):
             items = rule.retrieve()
             if norm:
-                scaler = QuantileTransformer(output_distribution="normal")
+                # scaler = QuantileTransformer(output_distribution="normal")
+                scaler = MinMaxScaler()
                 items["score"] = scaler.fit_transform(
                     items["score"].values.reshape(-1, 1)
                 )
