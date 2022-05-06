@@ -19,6 +19,7 @@ class RuleCollector:
         min_pos_rate: float = 0.01,
         item_id: str = "article_id",
         norm: bool = True,
+        norm_type: str = "quantile",
         compress=True,
     ) -> pd.DataFrame:
         """Collect retreival results
@@ -39,6 +40,10 @@ class RuleCollector:
             Minimum positive rate of the generated candidates, by default ``0.01``.
         item_id : str, optional
             Item unit, by default ``"article_id"``.
+        norm : bool, optional
+            Whether to normalize the score, by default ``True``.
+        norm_type : str, optional
+            Normalization method, by default ``"quantile"``.
         compress : bool, optional
             Whether to compress the candidate items into a list, by default ``True``.
 
@@ -66,8 +71,10 @@ class RuleCollector:
         for rule in tqdm(rules, "Retrieve items by rules"):
             items = rule.retrieve()
             if norm:
-                # scaler = QuantileTransformer(output_distribution="normal")
-                scaler = MinMaxScaler()
+                if norm_type == "quantile":
+                    scaler = QuantileTransformer(output_distribution="normal")
+                elif norm_type == "minmax":
+                    scaler = MinMaxScaler()
                 items["score"] = scaler.fit_transform(
                     items["score"].values.reshape(-1, 1)
                 )
