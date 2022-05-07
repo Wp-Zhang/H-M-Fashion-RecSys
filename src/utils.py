@@ -182,7 +182,7 @@ def reduce_mem_usage(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
 
 
 def merge_week_data(
-    data: Dict, week_num: int, candidates: pd.DataFrame
+    data, trans, week_num: int, candidates: pd.DataFrame
 ) -> pd.DataFrame:
     """Merge transaction, user and item features with week data.
 
@@ -204,9 +204,8 @@ def merge_week_data(
     """
     tqdm.pandas()
 
-    trans = data["inter"]
-    item = data["item"]
     user = data["user"]
+    item = data["item"]
 
     trans_info = (
         trans[trans["week"] == week_num + 1]
@@ -225,12 +224,15 @@ def merge_week_data(
 
     if week_num != 0:  # this is not test data
         start_date, end_date = calc_valid_date(week_num)
-        mask = (start_date <= trans["t_dat"]) & (trans["t_dat"] < end_date)
-        label = trans.loc[mask, ["customer_id", "article_id"]]
+        mask = (start_date <= data["inter"]["t_dat"]) & (
+            data["inter"]["t_dat"] < end_date
+        )
+        label = data["inter"].loc[mask, ["customer_id", "article_id"]]
         label = label.drop_duplicates(["customer_id", "article_id"])
         label["label"] = 1
 
         label_customers = label["customer_id"].unique()
+        print(len(label_customers))
         candidates = candidates[candidates["customer_id"].isin(label_customers)]
 
         candidates = candidates.merge(
@@ -242,6 +244,10 @@ def merge_week_data(
 
     # Merge with features
     candidates = candidates.merge(trans_info, on="article_id", how="left")
+    # candidates['week'] = candidates['week'].fillna(week_num)
+    # for f in trans_info.columns:
+    # if candidates[f].dtype != 'object':
+    # candidates[f] = candidates[f].fillna(0)
 
     user_feats = [
         "FN",
