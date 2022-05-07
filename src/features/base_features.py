@@ -40,7 +40,11 @@ def cum_sale(trans: pd.DataFrame, groupby_cols: List, unique=False) -> np.ndarra
 
 
 def week_sale(
-    trans: pd.DataFrame, groupby_cols: List, unique=False, step: int = 0
+    trans: pd.DataFrame,
+    target_df: pd.DataFrame,
+    groupby_cols: List,
+    unique=False,
+    step: int = 0,
 ) -> np.ndarray:
     """Calculate week sales of each item unit.
 
@@ -48,6 +52,8 @@ def week_sale(
     ----------
     trans : pd.DataFrame
         Dataframe of transaction data.
+    target_df : pd.DataFrame
+        Target dataframe to merge features on.
     groupby_cols : List
         Item unit.
     unique : bool, optional
@@ -60,29 +66,30 @@ def week_sale(
     np.ndarray
         Array of week sales.
     """
-    tmp_inter = trans[["week", "customer_id", *groupby_cols]]
+    df = trans[["week", "customer_id", *groupby_cols]]
     if unique:
-        tmp_inter = tmp_inter.drop_duplicates(["customer_id", *groupby_cols])
+        df = df.drop_duplicates(["customer_id", "week", *groupby_cols])
 
-    df = tmp_inter.groupby(["week", *groupby_cols]).size().reset_index(name="_SALE")
+    df = df.groupby(["week", *groupby_cols]).size().reset_index(name="_SALE")
     df["week"] -= step
 
-    tmp_inter = trans[["week", "customer_id", *groupby_cols]].merge(
+    df = target_df[["week", *groupby_cols]].merge(
         df, on=["week", *groupby_cols], how="left"
     )
-    tmp_inter["_SALE"] = tmp_inter["_SALE"].fillna(0).astype("int")
+    df["_SALE"] = df["_SALE"].fillna(0).astype("int")
 
-    return tmp_inter["_SALE"].values.astype(int)
+    return df["_SALE"].values.astype(int)
 
 
 def period_sale(
     trans: pd.DataFrame,
+    target_df: pd.DataFrame,
     groupby_cols: List,
+    week_no: int,
     unique=False,
     days: int = 14,
-    rank: bool = False,
-    norm: bool = False,
-    week_num: int = 6,
+    rank: bool = True,
+    norm: bool = True,
 ) -> np.array:
     """Calculate item unit sale in last n days.
 
@@ -90,8 +97,12 @@ def period_sale(
     ----------
     trans : pd.DataFrame
         Dataframe of transaction data.
+    target_df : pd.DataFrame
+        Target dataframe to merge features on.
     groupby_cols : List
         Item unit.
+    week_no: int
+        Number of current week.
     unique : bool, optional
         Whether to drop duplicate customer-item pairs, by default ``False``.
     days : int, optional
@@ -100,40 +111,32 @@ def period_sale(
         Whether to return rank of sale, by default ``False``.
     norm: bool, optional
         Whether to normalized count, by default ``False``.
-    week_num : int, optional
-        Number of weeks of data to calculate sale for, by default ``6``.
 
     Returns
     -------
     Tuple[np.array]
         Period sale (sale rank | normed sale).
     """
-    df = trans[[*groupby_cols, "customer_id", "t_dat", "week"]]
+    df = trans[[*groupby_cols, "customer_id", "t_dat"]]
     if unique:
         df = df.drop_duplicates(["customer_id", *groupby_cols])
 
     df["t_dat"] = pd.to_datetime(df["t_dat"])
 
-    tmp_l = []
     name = "PERIOD_SALE"
-    for week in range(1, week_num + 1):
-        _, end_date = calc_valid_date(week)
-        tmp_df = df[
-            (pd.to_datetime(end_date) - pd.Timedelta(days=days + 1) <= df["t_dat"])
-            & (df["t_dat"] < pd.to_datetime(end_date))
-        ]
-        sale = tmp_df.groupby(groupby_cols).size().reset_index(name=name)
-        sale["week"] = week
-        if rank:
-            sale[name + "_rank"] = sale[name].rank(ascending=False)
-        if norm:
-            sale[name + "_norm"] = sale[name] / sale[name].sum()
+    _, end_date = calc_valid_date(week_no)
+    df = df[
+        (pd.to_datetime(end_date) - pd.Timedelta(days=days + 1) <= df["t_dat"])
+        & (df["t_dat"] < pd.to_datetime(end_date))
+    ]
+    sale = df.groupby(groupby_cols).size().reset_index(name=name)
 
-        tmp_l.append(sale)
+    if rank:
+        sale[name + "_rank"] = sale[name].rank(ascending=False)
+    if norm:
+        sale[name + "_norm"] = sale[name] / sale[name].sum()
 
-    sale_df = pd.concat(tmp_l, ignore_index=True)
-    df = df.merge(sale_df, on=[*groupby_cols, "week"], how="left")
-
+    df = target_df[groupby_cols].merge(sale, on=groupby_cols, how="left")
     if not rank and not norm:
         return df[name].values.astype(int)
     elif rank and not norm:
@@ -149,7 +152,7 @@ def period_sale(
 
 
 def repurchase_ratio(
-    trans: pd.DataFrame, groupby_cols: List, week_num: int = 6
+    trans: pd.DataFrame, target_df: pd.DataFrame, groupby_cols: List
 ) -> np.ndarray:
     """Calculate repurchase ratio of item units.
 
@@ -157,6 +160,8 @@ def repurchase_ratio(
     ----------
     trans : pd.DataFrame
         Dataframe of transaction data.
+    target_df : pd.DataFrame
+        Target dataframe to merge features on.
     groupby_cols : List
         Item unit.
 
@@ -165,33 +170,27 @@ def repurchase_ratio(
     np.ndarray
         Array of repurchase ratios.
     """
-    tmp_l = []
-    for week in tqdm(range(1, week_num + 1)):
-        tmp_df = trans[trans["week"] >= week]
-        # * Article re-purchase ratio
-        item_user_sale = (
-            tmp_df.groupby(["customer_id", *groupby_cols])
-            .size()
-            .reset_index(name="_SALE")
-        )
-        item_sale = (
-            item_user_sale.groupby(groupby_cols).size().reset_index(name="_I_SALE")
-        )
-        item_user_sale = (
-            item_user_sale[item_user_sale["_SALE"] > 1]  # * purchase more than once
-            .groupby(groupby_cols)
-            .size()
-            .reset_index(name="_MULTI_SALE")
-        )
-        item_sale = item_sale.merge(item_user_sale, on=groupby_cols, how="left")
-        item_sale["_RATIO"] = item_sale["_MULTI_SALE"] / item_sale["_I_SALE"]
-        item_sale = item_sale[[*groupby_cols, "_RATIO"]]
-        item_sale["week"] = week
-        tmp_l.append(item_sale)
 
-    df = trans[["week", *groupby_cols]]
-    item_sale = pd.concat(tmp_l, ignore_index=True)
-    df = df.merge(item_sale, on=["week", *groupby_cols], how="left")
+    # * Article re-purchase ratio
+    item_sale = (
+        trans.groupby(groupby_cols)["customer_id"].count().reset_index(name="_I_SALE")
+    )
+    item_user_sale = (
+        trans.groupby(["customer_id", *groupby_cols]).size().reset_index(name="_SALE")
+    )
+    item_user_sale = (
+        item_user_sale[item_user_sale["_SALE"] > 1]  # * purchase more than once
+        .groupby(groupby_cols)
+        .size()
+        .reset_index(name="_MULTI_SALE")
+    )
+    item_sale = item_sale.merge(item_user_sale, on=groupby_cols, how="left")
+    item_sale["_MULTI_SALE"] = item_sale["_MULTI_SALE"].fillna(0)
+    item_sale["_RATIO"] = item_sale["_MULTI_SALE"] / item_sale["_I_SALE"]
+    item_sale = item_sale[[*groupby_cols, "_RATIO"]]
+
+    df = target_df[groupby_cols]
+    df = df.merge(item_sale, on=groupby_cols, how="left")
 
     return df["_RATIO"].values
 
@@ -224,24 +223,18 @@ def purchased_before(
 
 
 def popularity(
-    trans: pd.DataFrame, item_id: str = "article_id", week_num: int = 6
+    trans: pd.DataFrame, target_df: pd.DataFrame, item_id: str = "article_id"
 ) -> np.ndarray:
     df = trans[[item_id, "t_dat", "week"]]
     df["t_dat"] = pd.to_datetime(df["t_dat"])
 
-    tmp_l = []
     name = "Popularity_" + item_id
-    for week in range(1, week_num + 1):
-        tmp_df = df[df["week"] >= week]
-        last_day = tmp_df["t_dat"].max()
-        tmp_df[name] = 1 / ((last_day - tmp_df["t_dat"]).dt.days + 1)
-        tmp_df = tmp_df.groupby([item_id])[name].sum().reset_index()
-        tmp_df["week"] = week
-        tmp_l.append(tmp_df)
+    last_day = df["t_dat"].max()
+    df[name] = 1 / ((last_day - df["t_dat"]).dt.days + 1)
+    df = df.groupby([item_id])[name].sum().reset_index(name=name)
 
-    info = pd.concat(tmp_l)[[item_id, name, "week"]]
-    df = df.merge(info, on=[item_id, "week"], how="left")
-    return df[name].values
+    res = target_df[[item_id]].merge(df, on=item_id, how="left")
+    return res[name].values
 
 
 # def sale_trend(
