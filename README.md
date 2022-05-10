@@ -2,6 +2,10 @@
 
 Kaggle [H&M Personalized Fashion Recommendations](https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/overview) 🥈 Silver Medal Solution 45/3006
 
+![background](./imgs/img1.png)
+
+![rank](./imgs/img2.png)
+
 This repo contains our final solution. Big shout out to my wonderful teammates! [@zhouyuanzhe](https://github.com/zhouyuanzhe) [@tarickMorty](https://github.com/tarickMorty) [@Thomasyyj](https://github.com/Thomasyyj) [@ChenmienTan](https://github.com/ChenmienTan)
 
 Project Organization
