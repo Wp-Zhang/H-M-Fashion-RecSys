@@ -1,6 +1,6 @@
-# H&M Fashion Recommendation
+# H&M Personalized Fashion Recommendations
 
-Kaggle H&M Personalized Fashion Recommendation Contest Silver Medal Soultion 45/2987
+Kaggle [H&M Personalized Fashion Recommendations](https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/overview) 🥈 Silver Medal Soultion 45/3006
 
 This repo contains our final solution. Big shout out to my wonderful teammates! [@zhouyuanzhe](https://github.com/zhouyuanzhe) [@tarickMorty](https://github.com/tarickMorty) [@Thomasyyj](https://github.com/Thomasyyj) [@ChenmienTan](https://github.com/ChenmienTan)
 
