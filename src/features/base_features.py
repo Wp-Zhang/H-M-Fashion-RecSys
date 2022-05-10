@@ -215,36 +215,25 @@ def repurchase_ratio(
     return df["_RATIO"].values
 
 
-# def purchased_before(
-#     trans: pd.DataFrame, groupby_cols: List, week_num: int
-# ) -> np.ndarray:
-#     df = trans[[*groupby_cols, "customer_id", "t_dat", "week"]]
-#     df["t_dat"] = pd.to_datetime(df["t_dat"])
-
-#     tmp_l = []
-#     name = "PURCHASED_BEFORE"
-#     for week in range(1, week_num + 1):
-#         sale = (
-#             df[df["week"] >= week]
-#             .groupby(["customer_id", *groupby_cols])
-#             .size()
-#             .reset_index(name=name)
-#         )
-#         sale["week"] = week
-#         tmp_l.append(sale)
-
-#     sale_df = pd.concat(tmp_l, ignore_index=True)
-#     df = df.merge(sale_df, on=["week", "customer_id", *groupby_cols], how="left")
-#     mask = df[name].isna()
-#     df.loc[mask, name] = 0
-#     df.loc[~mask, name] = 1
-
-#     return df[name].values.astype(int)
-
-
 def popularity(
     trans: pd.DataFrame, item_id: str = "article_id", week_num: int = 6
 ) -> np.ndarray:
+    """Calculate popularity factor of item unit.
+
+    Parameters
+    ----------
+    trans : pd.DataFrame
+        Dataframe of transaction data.
+    item_id : str, optional
+        item unit id, by default ``"article_id"``.
+    week_num : int, optional
+        Number of weeks of data to calculate sale for, by default ``6``.
+
+    Returns
+    -------
+    np.ndarray
+        Array of popularity factors.
+    """
     df = trans[[item_id, "t_dat", "week", "valid"]]
     df["t_dat"] = pd.to_datetime(df["t_dat"])
 
@@ -262,63 +251,3 @@ def popularity(
     df = df.merge(info, on=[item_id, "week"], how="left")
     df[name] = df[name].fillna(0)
     return df[name].values
-
-
-# def sale_trend(
-#     trans: pd.DataFrame,
-#     groupby_cols: List,
-#     days: int = 7,
-#     item_id: str = "article_id",
-#     week_num: int = 6,
-# ) -> np.ndarray:
-#     """_summary_
-
-#     Parameters
-#     ----------
-#     trans : pd.DataFrame
-#         _description_
-#     groupby_cols : List
-#         _description_
-#     days : int, optional
-#         _description_, by default 7
-#     item_id : str, optional
-#         _description_, by default "article_id"
-
-#     Returns
-#     -------
-#     np.ndarray
-#         _description_
-#     """
-#     df = trans[[*groupby_cols, item_id, "t_dat", "week"]]
-#     df["t_dat"] = pd.to_datetime(df["t_dat"])
-
-#     tmp_l = []
-#     name = "SaleTrend_" + "|".join(groupby_cols) + "_" + item_id
-#     for week in range(1, week_num + 1):
-#         tmp_df = df[df["week"] >= week]
-#         tmp_df["dat_gap"] = (tmp_df.t_dat.max() - tmp_df.t_dat).dt.days
-
-#         tmp_df = tmp_df[tmp_df["dat_gap"] <= 2 * days - 1]
-#         group_a = tmp_df[tmp_df["dat_gap"] > days - 1]
-#         group_b = tmp_df[tmp_df["dat_gap"] <= days - 1]
-
-#         group_a["count"] = 1
-#         group_b["count"] = 1
-#         group_a = group_a.groupby([*groupby_cols, item_id])["count"].sum().reset_index()
-#         group_b = group_b.groupby([*groupby_cols, item_id])["count"].sum().reset_index()
-
-#         log = pd.merge(group_b, group_a, on=[*groupby_cols, item_id], how="left")
-#         log["count_x"] = log["count_x"].fillna(0)
-#         log["count_y"] = log["count_y"].fillna(0)
-#         log[name] = (log["count_x"] - log["count_y"]) / (log["count_y"] + 1)
-
-#         log = log[[*groupby_cols, item_id, name]]
-#         res = df[df["week"] >= week].merge(log, on=[*groupby_cols, item_id], how="left")
-
-#         tmp_l.append(res)
-
-#     info = pd.concat(tmp_l)[[*groupby_cols, item_id, name, "week"]]
-#     info = info.drop_duplicates(groupby_cols + [item_id, "week"])
-#     df = df.merge(info, on=[*groupby_cols, item_id, "week"], how="left")
-
-#     return df[name].values

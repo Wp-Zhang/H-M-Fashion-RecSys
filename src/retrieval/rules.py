@@ -765,7 +765,25 @@ class UserGroupBPR(PersonalRetrieveRule):
 
 
 class ItemCF(PersonalRetrieveRule):
-    def __init__(self, history_df, target_df, top_k=20, name="1"):
+    """Item-Item Collaborative Filtering."""
+
+    def __init__(
+        self, history_df: pd.DataFrame, target_df: pd.DataFrame, top_k=20, name="1"
+    ):
+        """Initialize ItemCF.
+
+        Parameters
+        ----------
+        history_df : pd.DataFrame
+            Dataframe of transaction records.
+        target_df : pd.DataFrame
+            Dataframe of target customer transaction records.
+        top_k : int, optional
+            Get top `k` similar items, by default ``20``.
+        name: str, optional
+            Name of the rule, by default ``1``.
+        """
+
         self.history_df = history_df.groupby("customer_id")["article_id"].apply(list)
         self.target_df = target_df.groupby("customer_id")["article_id"].apply(list)
         self.top_k = top_k
@@ -794,8 +812,6 @@ class ItemCF(PersonalRetrieveRule):
 
         sim_item_corr = sim_item.copy()
         for i, related_items in sim_item.items():
-            # for j, cij in related_items.items():
-            # sim_item_corr[i][j] = cij / math.sqrt(item_cnt.get(i,1) * item_cnt.get(j,1))
             sim_item_corr[i] = sorted(
                 related_items.items(), key=lambda x: x[1], reverse=True
             )
@@ -850,7 +866,31 @@ class ItemCF(PersonalRetrieveRule):
 
 
 class UserGroupItemCF(PersonalRetrieveRule):
-    def __init__(self, history_df, target_df, cat_col, top_k=20, name="1"):
+    """Item-Item Collaborative Filtering for a user group."""
+
+    def __init__(
+        self,
+        history_df: pd.DataFrame,
+        target_df: pd.DataFrame,
+        cat_col: str,
+        top_k=20,
+        name="1",
+    ):
+        """Initialize UserGroupItemCF.
+
+        Parameters
+        ----------
+        history_df : pd.DataFrame
+            Dataframe of transaction records.
+        target_df : pd.DataFrame
+            Dataframe of target customer transaction records.
+        cat_col : str
+            Column name of user group.
+        top_k : int, optional
+            Get top `k` similar items, by default ``20``.
+        name : str, optional
+            Name of the rule, by default ``1``.
+        """
         self.history_dict = {}
         self.target_dict = {}
         for value in history_df[cat_col].unique():
@@ -1302,93 +1342,3 @@ class OutOfStock(FilterRule):
         off_stock = self._off_stock_items()
 
         return off_stock
-
-
-class OutOfStock2(FilterRule):
-    """Filter items that are out of stock."""
-
-    def __init__(
-        self, trans_df: pd.DataFrame, item_id: str = "article_id", days: int = 14
-    ):
-        """Initialize OutOfStock.
-
-        Parameters
-        ----------
-        trans_df : pd.DataFrame
-            Dataframe of transaction records.
-        item_id : str, optional
-           Name of item id, by default ``"article_id"``.
-        """
-        self.iid = item_id
-        self.days = days
-        start_date = pd.to_datetime(trans_df["t_dat"].max())
-        start_date -= pd.Timedelta(days=days * 2)
-        self.start_date = start_date
-        mask = trans_df["t_dat"] >= start_date.strftime("%Y-%m-%d")
-        self.trans_df = trans_df.loc[mask, ["customer_id", self.iid, "t_dat"]]
-
-    def _off_stock_items(self) -> List[int]:
-        """Get items that are no longer for sale
-
-        Returns:
-            List: list of off stock items
-        """
-        sale = self.trans_df
-        sale["t_dat"] = pd.to_datetime(sale["t_dat"])
-        sale["GROUP"] = (sale["t_dat"] - self.start_date).dt.days // self.days
-        sale = (
-            sale.groupby([self.iid, "GROUP"])["customer_id"]
-            .count()
-            .reset_index(name="count")
-        )
-
-        sale = pd.pivot_table(sale, values="count", index=self.iid, columns="GROUP")
-        sale = sale.fillna(0)
-        mask = ((sale[1] - sale[0]) / sale[0]) < -0.8
-        mask2 = sale[1] == 0
-
-        return list(sale[mask | mask2].index)
-
-    def retrieve(self) -> List:
-        off_stock = self._off_stock_items()
-
-        return off_stock
-
-
-# * ======================= TBD ======================= *
-
-
-class TimeHistoryRetrieve2(GlobalRetrieveRule):
-    def __init__(self, trans_df, n=12, item_id: str = "article_id"):
-        self.iid = item_id
-        self.trans_df = trans_df[["customer_id", self.iid, "t_dat"]]
-        self.n = n
-
-    def retrieve(self):
-        df = self.trans_df
-        df["t_dat"] = pd.to_datetime(df["t_dat"])
-        last_ts = df["t_dat"].max()
-        df["dat_gap"] = (last_ts - df["t_dat"]).dt.days
-
-        df["last_day"] = last_ts - (last_ts - df["t_dat"]).dt.floor(f"{self.n}D")
-        period_sales = (
-            df[["last_day", self.iid, "t_dat"]].groupby(["last_day", self.iid]).count()
-        )
-        period_sales = period_sales.rename(columns={"t_dat": "period_sale"})
-        df = df.join(period_sales, on=["last_day", self.iid])
-
-        period_sales = period_sales.reset_index().set_index(self.iid)
-        last_day = last_ts.strftime("%Y-%m-%d")
-        df = df.join(
-            period_sales.loc[period_sales["last_day"] == last_day, ["period_sale"]],
-            on=self.iid,
-            rsuffix="_targ",
-        )
-        df["period_sale_targ"].fillna(0, inplace=True)
-        df["quotient"] = df["period_sale_targ"] / df["period_sale"]
-        del df["period_sale_targ"], df["period_sale"]
-
-        df = df.groupby(self.iid)["quotient"].sum()
-        df = df.sort_values(ascending=False)
-
-        return df.index.tolist()[: self.n]

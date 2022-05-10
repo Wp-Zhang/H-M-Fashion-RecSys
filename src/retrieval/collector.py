@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import List, Dict
+from typing import List
 from tqdm import tqdm
 from sklearn.preprocessing import QuantileTransformer, MinMaxScaler
 from ..utils import calc_valid_date
@@ -94,8 +94,6 @@ class RuleCollector:
                 # * has the highest positive rate.
                 if pos_rate < min_pos_rate:
                     tmp_items = tmp_items.sort_values(by="score", ascending=False)
-                    # tmp_items = tmp_items.reset_index(drop=True).reset_index()
-                    # tmp_items["rank"] = tmp_items.groupby("customer_id")["index"].rank()
                     tmp_items["rank"] = tmp_items.groupby("customer_id")["score"].rank(
                         ascending=False
                     )
