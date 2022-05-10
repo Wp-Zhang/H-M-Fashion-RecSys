@@ -1,7 +1,7 @@
 from typing import Tuple, Dict, List
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
+from tqdm._tqdm_notebook import tqdm_notebook as tqdm
 
 
 def calc_valid_date(week_num: int, last_date: str = "2020-09-29") -> Tuple[str]:
@@ -25,68 +25,6 @@ def calc_valid_date(week_num: int, last_date: str = "2020-09-29") -> Tuple[str]:
     end_date = end_date.strftime("%Y-%m-%d")
     start_date = start_date.strftime("%Y-%m-%d")
     return start_date, end_date
-
-
-def re_encode_ids(
-    data: Dict, user_features: List[str], item_features: List[str]
-) -> Tuple[Dict]:
-    """Rencode ids in the dataset to reduce embedding size.
-
-    Parameters
-    ----------
-    data : Dict
-        Dataset.
-    user_features : List[str]
-        List of user features.
-    item_features : List[str]
-        List of item features.
-
-    Returns
-    -------
-    Tuple[Dict]
-        Dataset with re-encoded ids, encode maps.
-    """
-    feat2idx_dict = {}
-    user = data["user"]
-    item = data["item"]
-    inter = data["inter"]
-
-    for feat in user_features:
-        if feat in inter.columns:
-            valid_ids = inter[feat].unique()
-            user = user.loc[user[feat].isin(valid_ids)]
-        else:
-            valid_ids = user[feat].unique()
-
-        id2idx_map = {x: i + 1 for i, x in enumerate(list(valid_ids))}
-        user[feat] = user[feat].map(id2idx_map)
-
-        if feat in inter.columns:
-            inter[feat] = inter[feat].map(id2idx_map)
-        feat2idx_dict[feat] = id2idx_map
-
-    for feat in item_features:
-        if feat in inter.columns:
-            valid_ids = inter[feat].unique()
-            item = item.loc[item[feat].isin(valid_ids)]
-        else:
-            valid_ids = item[feat].unique()
-
-        id2idx_map = {x: i + 1 for i, x in enumerate(list(valid_ids))}
-        item[feat] = item[feat].map(id2idx_map)
-
-        if feat in inter.columns:
-            inter[feat] = inter[feat].map(id2idx_map)
-        feat2idx_dict[feat] = id2idx_map
-
-    user = user.reset_index(drop=True)
-    item = item.reset_index(drop=True)
-
-    data["user"] = user
-    data["item"] = item
-    data["inter"] = inter
-
-    return data, feat2idx_dict
 
 
 def reduce_mem_usage(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
@@ -182,7 +120,7 @@ def reduce_mem_usage(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
 
 
 def merge_week_data(
-    data, trans, week_num: int, candidates: pd.DataFrame
+    data: Dict, trans: pd.DataFrame, week_num: int, candidates: pd.DataFrame
 ) -> pd.DataFrame:
     """Merge transaction, user and item features with week data.
 
@@ -190,17 +128,17 @@ def merge_week_data(
     ----------
     data : Dict
         Dataset.
+    trans : pd.DataFrame
+        Dataframe of transaction records.
     week_num : int
         Week number.
     candidates : pd.DataFrame
         Retrieval candidates.
-    label : pd.DataFrame
-        Valid set.
 
     Returns
     -------
     pd.DataFrame
-        Merged data.
+        Merged data ready for training.
     """
     tqdm.pandas()
 
@@ -217,8 +155,6 @@ def merge_week_data(
     )
     trans_info["week"] = week_num
     trans_info, _ = reduce_mem_usage(trans_info)
-    # item, _ = reduce_mem_usage(item)
-    # user, _ = reduce_mem_usage(user)
 
     # * ======================================================================================================================
 
@@ -244,10 +180,6 @@ def merge_week_data(
 
     # Merge with features
     candidates = candidates.merge(trans_info, on="article_id", how="left")
-    # candidates['week'] = candidates['week'].fillna(week_num)
-    # for f in trans_info.columns:
-    # if candidates[f].dtype != 'object':
-    # candidates[f] = candidates[f].fillna(0)
 
     user_feats = [
         "FN",
@@ -283,7 +215,11 @@ def merge_week_data(
 
 
 def calc_embd_similarity(
-    candidate: pd.DataFrame, user_embd: np.ndarray, item_embd: np.ndarray
+    candidate: pd.DataFrame,
+    user_embd: np.ndarray,
+    item_embd: np.ndarray,
+    sub: bool = True,
+    item_id: str = "article_id",
 ) -> np.ndarray:
     """Calculate user-item embedding similarity.
 
@@ -295,6 +231,10 @@ def calc_embd_similarity(
         Pre-trained user embedding.
     item_embd : np.ndarray
         Pre-trained item embedding.
+    sub : bool, optional
+        Whether to subtract 1 from id values.
+    item_id : str, optional
+        Item id column name.
 
     Returns
     -------
@@ -302,15 +242,22 @@ def calc_embd_similarity(
         Similarity array.
     """
     # * maybe add embedding statistic info like std, mean, etc?
+    
     sim = np.zeros(candidate.shape[0])
     batch_size = 10000
     for batch in tqdm(range(0, candidate.shape[0], batch_size)):
-        tmp_users = (
-            candidate.loc[batch : batch + batch_size - 1, "customer_id"].values - 1
-        )
-        tmp_items = (
-            candidate.loc[batch : batch + batch_size - 1, "article_id"].values - 1
-        )
+        if sub:
+            tmp_users = (
+                candidate.loc[batch : batch + batch_size - 1, "customer_id"].values - 1
+            )
+            tmp_items = (
+                candidate.loc[batch : batch + batch_size - 1, item_id].values - 1
+            )
+        else:
+            tmp_users = candidate.loc[
+                batch : batch + batch_size - 1, "customer_id"
+            ].values
+            tmp_items = candidate.loc[batch : batch + batch_size - 1, item_id].values
         tmp_user_embd = np.expand_dims(user_embd[tmp_users], 1)  # (batch_size, 1, dim)
         tmp_item_embd = np.expand_dims(item_embd[tmp_items], 2)  # (batch_size, dim, 1)
         tmp_sim = np.einsum("ijk,ikj->ij", tmp_user_embd, tmp_item_embd)
