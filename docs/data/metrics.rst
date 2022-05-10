@@ -1,5 +1,5 @@
 data.metrics
 ============
 
-.. automodule:: data.metrics
+.. automodule:: src.data.metrics
    :members:

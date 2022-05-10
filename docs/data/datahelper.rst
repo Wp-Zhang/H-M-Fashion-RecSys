@@ -1,5 +1,5 @@
 data.datahelper
 ===============
 
-.. autoclass:: data.DataHelper
+.. autoclass:: src.data.DataHelper
    :members:
