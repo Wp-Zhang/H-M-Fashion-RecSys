@@ -2,6 +2,8 @@
 
 Kaggle H&M Personalized Fashion Recommendation Contest Silver Medal Soultion 45/2987
 
+This repo contains our final solution. Big shout out to my wonderful teammates! [@zhouyuanzhe](https://github.com/zhouyuanzhe) [@tarickMorty](https://github.com/tarickMorty) [@Thomasyyj](https://github.com/Thomasyyj) [@ChenmienTan](https://github.com/ChenmienTan)
+
 Project Organization
 ------------
 
