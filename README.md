@@ -8,7 +8,7 @@ Kaggle [H&M Personalized Fashion Recommendations](https://www.kaggle.com/competi
 
 This repo contains our final solution. Big shout out to my wonderful teammates! [@zhouyuanzhe](https://github.com/zhouyuanzhe) [@tarickMorty](https://github.com/tarickMorty) [@Thomasyyj](https://github.com/Thomasyyj) [@ChenmienTan](https://github.com/ChenmienTan)
 
-Our team ranked 45/3006 in the end with a LB score of 0.0292 and a PB score of 0.02986.
+Our team ranked 45/3006 in the end with a LB score of 0.0292 and a PB score of 0.02996.
 
 Our final solution contains 2 recall strategies and we trained 3 different ranking models (LGB ranker, LGB classifier, DNN) for each strategy.
 
