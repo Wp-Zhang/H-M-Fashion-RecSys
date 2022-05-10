@@ -4,7 +4,7 @@ readthedocs-sphinx-search==0.1.1
 sphinxcontrib-napoleon==0.7
 myst_parser==0.17.0
 
-attr
+attrs
 numpy
 pandas
 scikit_learn
